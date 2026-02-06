@@ -65,7 +65,7 @@ class GitHubAdapter(PlatformAdapter):
             raise Exception("Not authenticated. Call authenticate() first.")
 
         pr = self.repo.get_pull(int(pr_number))
-        files = pr.get_files()
+        files = list(pr.get_files())  # Convert PaginatedList to list to ensure all files are fetched
 
         changes = []
         for file in files:
@@ -128,8 +128,9 @@ class GitHubAdapter(PlatformAdapter):
             "suggestion": "💭",
         }
 
-        # Get latest commit for review
-        commit = pr.get_commits().reversed[0]
+        # Get latest commit for review (more efficient than reversing all commits)
+        commits = pr.get_commits()
+        commit = commits[commits.totalCount - 1]
 
         for comment in comments:
             emoji = severity_emoji.get(comment.get("severity", "suggestion"), "💬")

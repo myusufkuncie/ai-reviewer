@@ -226,6 +226,11 @@ class CodeReviewer:
         Returns:
             True if file should be excluded
         """
+        # Hardcoded exclusion for config files (always exclude)
+        filename = filepath.split('/')[-1]
+        if filename.startswith('.ai-review-config') and filename.endswith('.json'):
+            return True
+
         exclusions = self.config.get_exclusions()
 
         # Check directories
@@ -234,7 +239,6 @@ class CodeReviewer:
                 return True
 
         # Check file prefixes
-        filename = filepath.split('/')[-1]
         for prefix in exclusions.get('file_prefixes', []):
             if filename.startswith(prefix):
                 return True

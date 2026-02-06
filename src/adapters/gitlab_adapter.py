@@ -96,7 +96,7 @@ class GitLabAdapter(PlatformAdapter):
 
         try:
             # Get repository tree for the directory
-            items = self.project.repository_tree(path=directory, ref=ref, recursive=False)
+            items = self.project.repository_tree(path=directory, ref=ref, recursive=False, get_all=True)
             return [
                 {
                     'path': item['path'],
