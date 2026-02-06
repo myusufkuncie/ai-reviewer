@@ -121,8 +121,13 @@ class CodeReviewer:
             stats['files_reviewed'] += 1
 
         # Post comments to platform
+        print(f"\n{'='*80}")
+        print("Posting review comments...")
+        print(f"{'='*80}")
         if all_comments:
             self.platform.post_comments(pr_id, all_comments)
+        else:
+            print("⊘ No comments to post")
 
         # Post summary
         self.platform.post_summary(pr_id, stats, all_comments)
