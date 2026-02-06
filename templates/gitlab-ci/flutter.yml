@@ -1,0 +1,43 @@
+# GitLab CI Template for Flutter AI Code Review
+
+ai-review-flutter:
+  stage: test
+  image: cirrusci/flutter:stable
+  only:
+    - merge_requests
+  except:
+    variables:
+      - $CI_MERGE_REQUEST_TITLE =~ /^Draft:/
+  before_script:
+    # Install Python and git for AI reviewer
+    - apt-get update -qq && apt-get install -y python3 python3-pip git
+    - git clone https://github.com/YOUR_USERNAME/ai-reviewer.git /tmp/ai-reviewer
+    - cd /tmp/ai-reviewer
+    - pip3 install -r requirements.txt
+    # Verify Flutter
+    - flutter doctor -v
+  script:
+    - cd /tmp/ai-reviewer
+    - python3 main_gitlab.py
+  variables:
+    GITLAB_TOKEN: $GITLAB_TOKEN
+    OPENROUTER_API_KEY: $OPENROUTER_API_KEY
+    REVIEW_LANGUAGE: 'dart'
+    REVIEW_FRAMEWORK: 'flutter'
+  cache:
+    key: ai-review-cache-flutter-${CI_COMMIT_REF_SLUG}
+    paths:
+      - .review_cache/
+      - .dart_tool/
+      - .packages
+  artifacts:
+    when: always
+    paths:
+      - .review_cache/
+    expire_in: 7 days
+  allow_failure: true
+  retry:
+    max: 2
+    when:
+      - api_failure
+      - runner_system_failure

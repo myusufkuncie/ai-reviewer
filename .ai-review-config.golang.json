@@ -1,0 +1,60 @@
+{
+  "enabled": true,
+  "ai_provider": "openrouter",
+  "model": "anthropic/claude-sonnet-4.5",
+
+  "language_specific": {
+    "go": {
+      "enabled": true,
+      "check_error_handling": true,
+      "goroutine_safety": true,
+      "interface_design": true,
+      "context_usage": true,
+      "race_conditions": true,
+      "defer_usage": true,
+      "focus_areas": [
+        "Error handling patterns (never ignore errors)",
+        "Goroutine leaks and proper cleanup",
+        "Context propagation and cancellation",
+        "Interface design (accept interfaces, return structs)",
+        "Mutex usage and race conditions",
+        "Defer placement and execution order",
+        "Idiomatic Go patterns"
+      ]
+    }
+  },
+
+  "exclusions": {
+    "directories": [
+      "vendor",
+      "bin",
+      "target"
+    ],
+    "file_patterns": [
+      "*_test.go"
+    ]
+  },
+
+  "review_settings": {
+    "severity_threshold": "minor",
+    "check_performance": true,
+    "max_comments_per_file": 10
+  },
+
+  "custom_rules": {
+    "patterns": [
+      {
+        "name": "Ignored errors",
+        "pattern": "_,\\s*_\\s*[:=]|_\\s*[:=].*Error",
+        "severity": "major",
+        "message": "Error appears to be ignored. Always handle errors in Go."
+      },
+      {
+        "name": "Goroutine without WaitGroup",
+        "pattern": "go\\s+func\\(",
+        "severity": "minor",
+        "message": "Ensure goroutine has proper synchronization or cleanup mechanism."
+      }
+    ]
+  }
+}

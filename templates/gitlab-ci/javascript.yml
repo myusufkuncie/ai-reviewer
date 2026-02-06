@@ -1,0 +1,42 @@
+# GitLab CI Template for JavaScript/TypeScript AI Code Review
+
+ai-review-javascript:
+  stage: test
+  image: node:20
+  only:
+    - merge_requests
+  except:
+    variables:
+      - $CI_MERGE_REQUEST_TITLE =~ /^Draft:/
+  before_script:
+    # Install Python and git for AI reviewer
+    - apt-get update -qq && apt-get install -y python3 python3-pip git
+    - git clone https://github.com/YOUR_USERNAME/ai-reviewer.git /tmp/ai-reviewer
+    - cd /tmp/ai-reviewer
+    - pip3 install -r requirements.txt
+    # Verify Node
+    - node --version
+    - npm --version
+  script:
+    - cd /tmp/ai-reviewer
+    - python3 main_gitlab.py
+  variables:
+    GITLAB_TOKEN: $GITLAB_TOKEN
+    OPENROUTER_API_KEY: $OPENROUTER_API_KEY
+    REVIEW_LANGUAGE: 'javascript'
+  cache:
+    key: ai-review-cache-js-${CI_COMMIT_REF_SLUG}
+    paths:
+      - .review_cache/
+      - node_modules/
+  artifacts:
+    when: always
+    paths:
+      - .review_cache/
+    expire_in: 7 days
+  allow_failure: true
+  retry:
+    max: 2
+    when:
+      - api_failure
+      - runner_system_failure

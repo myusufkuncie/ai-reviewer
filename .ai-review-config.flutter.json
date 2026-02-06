@@ -1,0 +1,46 @@
+{
+  "enabled": true,
+  "ai_provider": "openrouter",
+  "model": "anthropic/claude-sonnet-4.5",
+
+  "language_specific": {
+    "flutter": {
+      "enabled": true,
+      "check_pubspec": true,
+      "widget_best_practices": true,
+      "state_management_patterns": ["bloc", "riverpod"],
+      "check_dispose": true,
+      "check_async_gaps": true,
+      "accessibility_checks": true,
+      "performance_checks": true,
+      "focus_areas": [
+        "Widget tree optimization",
+        "State management with BLoC/Riverpod",
+        "Memory leaks (missing dispose)",
+        "Async gaps in widget lifecycle",
+        "Platform-specific code patterns"
+      ]
+    }
+  },
+
+  "exclusions": {
+    "directories": [
+      "build",
+      ".dart_tool",
+      "ios/Pods",
+      "android/build"
+    ],
+    "file_patterns": [
+      "*.g.dart",
+      "*.freezed.dart",
+      "*.mocks.dart",
+      "*.gr.dart"
+    ]
+  },
+
+  "review_settings": {
+    "severity_threshold": "minor",
+    "check_performance": true,
+    "max_comments_per_file": 8
+  }
+}

@@ -1,0 +1,73 @@
+# GitLab CI Template for Multi-Language AI Code Review
+# This template auto-detects the language and runs appropriate reviews
+
+ai-review:
+  stage: test
+  image: python:3.11
+  only:
+    - merge_requests
+  except:
+    variables:
+      - $CI_MERGE_REQUEST_TITLE =~ /^Draft:/
+      - $CI_MERGE_REQUEST_TITLE =~ /^WIP:/
+  before_script:
+    - git clone https://github.com/YOUR_USERNAME/ai-reviewer.git /tmp/ai-reviewer
+    - cd /tmp/ai-reviewer
+    - pip install -r requirements.txt
+  script:
+    - cd /tmp/ai-reviewer
+    - echo "Running AI Code Review for MR !${CI_MERGE_REQUEST_IID}"
+    - python main_gitlab.py
+  after_script:
+    - |
+      if [ -f .review_summary.json ]; then
+        echo "Review Summary:"
+        cat .review_summary.json
+      fi
+  variables:
+    GITLAB_TOKEN: $GITLAB_TOKEN
+    OPENROUTER_API_KEY: $OPENROUTER_API_KEY
+    REVIEW_LANGUAGE: 'auto'
+    AI_REVIEWER_DEBUG: 'false'
+  cache:
+    key: ai-review-cache-${CI_COMMIT_REF_SLUG}
+    paths:
+      - .review_cache/
+    policy: pull-push
+  artifacts:
+    when: always
+    paths:
+      - .review_cache/
+      - .review_summary.json
+    reports:
+      dotenv: .review_summary.env
+    expire_in: 7 days
+  allow_failure: true
+  timeout: 10m
+  retry:
+    max: 2
+    when:
+      - api_failure
+      - runner_system_failure
+  tags:
+    - docker
+
+# Optional: Run review only on specific file changes
+ai-review-conditional:
+  extends: ai-review
+  only:
+    refs:
+      - merge_requests
+    changes:
+      - "**/*.py"
+      - "**/*.js"
+      - "**/*.ts"
+      - "**/*.jsx"
+      - "**/*.tsx"
+      - "**/*.dart"
+      - "**/*.go"
+      - "**/*.java"
+      - "requirements.txt"
+      - "package.json"
+      - "pubspec.yaml"
+      - "go.mod"

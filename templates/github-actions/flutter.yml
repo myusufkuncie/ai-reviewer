@@ -1,0 +1,70 @@
+name: AI Code Review - Flutter
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '**.dart'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+
+jobs:
+  ai-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Fetch base branch
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref }}
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.x'
+          channel: 'stable'
+
+      - name: Flutter doctor
+        run: flutter doctor -v
+
+      - name: Set up Python for AI Reviewer
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Clone AI Reviewer
+        run: |
+          git clone https://github.com/YOUR_USERNAME/ai-reviewer.git /tmp/ai-reviewer
+          cd /tmp/ai-reviewer
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run AI Code Review
+        working-directory: /tmp/ai-reviewer
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          GITHUB_HEAD_REF: ${{ github.event.pull_request.head.sha }}
+          REVIEW_LANGUAGE: 'dart'
+          REVIEW_FRAMEWORK: 'flutter'
+        run: python main_github.py
+
+      - name: Upload review cache
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-cache-flutter
+          path: .review_cache/
+          retention-days: 7

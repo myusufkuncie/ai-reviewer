@@ -1,0 +1,69 @@
+name: AI Code Review - Go
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+
+jobs:
+  ai-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Fetch base branch
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Verify Go installation
+        run: go version
+
+      - name: Set up Python for AI Reviewer
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Clone AI Reviewer
+        run: |
+          git clone https://github.com/YOUR_USERNAME/ai-reviewer.git /tmp/ai-reviewer
+          cd /tmp/ai-reviewer
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run AI Code Review
+        working-directory: /tmp/ai-reviewer
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          GITHUB_HEAD_REF: ${{ github.event.pull_request.head.sha }}
+          REVIEW_LANGUAGE: 'go'
+        run: python main_github.py
+
+      - name: Upload review cache
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-cache-go
+          path: .review_cache/
+          retention-days: 7

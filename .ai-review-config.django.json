@@ -1,0 +1,62 @@
+{
+  "enabled": true,
+  "ai_provider": "openrouter",
+  "model": "anthropic/claude-sonnet-4.5",
+
+  "language_specific": {
+    "python": {
+      "enabled": true,
+      "check_type_hints": true,
+      "pep8_compliance": true,
+      "django_security": true,
+      "async_patterns": true,
+      "focus_areas": [
+        "Django ORM best practices",
+        "SQL injection prevention",
+        "XSS vulnerabilities",
+        "CSRF protection",
+        "Authentication/Authorization",
+        "Middleware security",
+        "Template injection",
+        "N+1 query detection"
+      ]
+    }
+  },
+
+  "exclusions": {
+    "directories": [
+      "migrations",
+      "venv",
+      "__pycache__",
+      "staticfiles",
+      "media"
+    ],
+    "file_prefixes": [
+      "test_"
+    ]
+  },
+
+  "review_settings": {
+    "severity_threshold": "minor",
+    "require_tests": true,
+    "check_security": true,
+    "check_performance": true
+  },
+
+  "custom_rules": {
+    "patterns": [
+      {
+        "name": "Raw SQL usage",
+        "pattern": "\\.raw\\(|execute\\(.*SELECT",
+        "severity": "major",
+        "message": "Raw SQL detected. Prefer Django ORM or ensure proper parameterization."
+      },
+      {
+        "name": "Missing CSRF exempt",
+        "pattern": "@csrf_exempt",
+        "severity": "critical",
+        "message": "CSRF exemption should only be used when absolutely necessary and properly documented."
+      }
+    ]
+  }
+}

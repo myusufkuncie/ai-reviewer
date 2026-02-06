@@ -1,0 +1,219 @@
+{
+  "enabled": true,
+  "ai_provider": "openrouter",
+  "model": "anthropic/claude-sonnet-4.5",
+  "max_tokens": 4000,
+  "temperature": 0.3,
+
+  "language_specific": {
+    "flutter": {
+      "enabled": true,
+      "check_pubspec": true,
+      "widget_best_practices": true,
+      "state_management_patterns": ["bloc", "riverpod", "provider", "getx"],
+      "check_dispose": true,
+      "check_async_gaps": true,
+      "accessibility_checks": true,
+      "performance_checks": true,
+      "platform_specific_code": true,
+      "focus_areas": [
+        "Widget optimization",
+        "State management",
+        "Memory leaks",
+        "Build method performance",
+        "Stateless vs Stateful usage"
+      ]
+    },
+    "python": {
+      "enabled": true,
+      "check_type_hints": true,
+      "pep8_compliance": true,
+      "django_security": true,
+      "flask_security": true,
+      "fastapi_best_practices": true,
+      "async_patterns": true,
+      "focus_areas": [
+        "SQL injection",
+        "XSS vulnerabilities",
+        "CSRF protection",
+        "Authentication/Authorization",
+        "Input validation",
+        "Error handling"
+      ]
+    },
+    "go": {
+      "enabled": true,
+      "check_error_handling": true,
+      "goroutine_safety": true,
+      "interface_design": true,
+      "context_usage": true,
+      "race_conditions": true,
+      "defer_usage": true,
+      "focus_areas": [
+        "Error handling patterns",
+        "Goroutine leaks",
+        "Context propagation",
+        "Interface design",
+        "Idiomatic Go patterns"
+      ]
+    },
+    "javascript": {
+      "enabled": true,
+      "check_react_hooks": true,
+      "async_best_practices": true,
+      "check_typescript": true,
+      "immutability_checks": true,
+      "performance_checks": true,
+      "focus_areas": [
+        "React hooks rules",
+        "Async/await patterns",
+        "Memory leaks",
+        "Type safety",
+        "Performance optimization"
+      ]
+    },
+    "java": {
+      "enabled": true,
+      "spring_security": true,
+      "exception_handling": true,
+      "resource_management": true,
+      "thread_safety": true,
+      "focus_areas": [
+        "Exception handling",
+        "Resource leaks",
+        "Thread safety",
+        "SQL injection",
+        "Spring best practices"
+      ]
+    },
+    "rust": {
+      "enabled": true,
+      "ownership_checks": true,
+      "error_handling": true,
+      "unsafe_code": true,
+      "concurrency_patterns": true,
+      "focus_areas": [
+        "Ownership and borrowing",
+        "Error handling (Result/Option)",
+        "Unsafe code usage",
+        "Concurrency patterns",
+        "Performance"
+      ]
+    }
+  },
+
+  "exclusions": {
+    "directories": [
+      "node_modules",
+      "vendor",
+      "dist",
+      "build",
+      ".git",
+      "__pycache__",
+      ".pytest_cache",
+      "coverage",
+      "venv",
+      "env",
+      ".venv",
+      "migrations",
+      "target",
+      "bin",
+      "obj",
+      ".dart_tool",
+      "ios/Pods",
+      "android/build"
+    ],
+    "file_prefixes": [
+      "test_",
+      "_test",
+      ".min.",
+      "bundle.",
+      "vendor.",
+      "legacy_",
+      "deprecated_"
+    ],
+    "file_patterns": [
+      "*.lock",
+      "*.log",
+      "*.pyc",
+      "*.pyo",
+      "*.so",
+      "*.dylib",
+      "*.dll",
+      "*.exe",
+      "*.o",
+      "*.a",
+      "package-lock.json",
+      "yarn.lock",
+      "poetry.lock",
+      "Pipfile.lock",
+      "Gemfile.lock",
+      "*.min.js",
+      "*.min.css",
+      "*.map",
+      "*.g.dart",
+      "*.freezed.dart",
+      "*.mocks.dart"
+    ]
+  },
+
+  "review_settings": {
+    "severity_threshold": "minor",
+    "auto_approve_minor": false,
+    "require_tests": true,
+    "check_security": true,
+    "check_performance": true,
+    "check_code_quality": true,
+    "check_best_practices": true,
+    "max_comments_per_file": 10,
+    "skip_binary_files": true,
+    "skip_large_files": true,
+    "max_file_size_kb": 500,
+    "max_diff_size_chars": 10000
+  },
+
+  "comment_settings": {
+    "style": "detailed",
+    "include_examples": true,
+    "include_references": true,
+    "include_fix_suggestions": true,
+    "use_emojis": true,
+    "group_by_severity": true
+  },
+
+  "cache_settings": {
+    "enabled": true,
+    "ttl_days": 7,
+    "cache_location": ".review_cache"
+  },
+
+  "notification_settings": {
+    "post_summary": true,
+    "post_inline_comments": true,
+    "notify_on_critical": true,
+    "notify_on_no_issues": true
+  },
+
+  "custom_rules": {
+    "patterns": [
+      {
+        "name": "Hardcoded secrets",
+        "pattern": "(password|secret|api_key|token)\\s*=\\s*['\"][^'\"]+['\"]",
+        "severity": "critical",
+        "message": "Potential hardcoded secret detected. Use environment variables instead."
+      },
+      {
+        "name": "Console.log in production",
+        "pattern": "console\\.(log|debug|info)",
+        "severity": "minor",
+        "message": "Console statements should be removed or replaced with proper logging."
+      },
+      {
+        "name": "TODO comments",
+        "pattern": "(TODO|FIXME|HACK|XXX)",
+        "severity": "suggestion",
+        "message": "TODO comment found. Consider creating a task or issue."
+      }
+    ]
+  }
+}
