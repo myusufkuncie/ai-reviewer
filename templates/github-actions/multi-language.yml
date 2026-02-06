@@ -1,4 +1,5 @@
 name: AI Code Review - Multi-Language
+# Features: 2-pass verification with automatic linter integration for all languages
 
 on:
   pull_request:
@@ -37,6 +38,16 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
+
+      - name: Install linters for 2-pass verification
+        run: |
+          # Python linter
+          pip install pylint
+          # JavaScript/TypeScript linter
+          npm install -g eslint
+          # Go linter
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Clone AI Reviewer
         run: |

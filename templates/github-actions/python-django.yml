@@ -1,4 +1,5 @@
 name: AI Code Review - Python/Django
+# Features: 2-pass verification with automatic pylint/flake8 linter integration
 
 on:
   pull_request:
@@ -33,6 +34,12 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
+
+      - name: Install Python linter (for 2-pass verification)
+        run: |
+          pip install pylint
+          # Optional: Install flake8 as fallback
+          # pip install flake8
 
       - name: Clone AI Reviewer
         run: |

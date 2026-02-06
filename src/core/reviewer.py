@@ -3,6 +3,12 @@
 from typing import Dict, List, Optional
 from .config import ConfigLoader
 from .cache import CacheManager
+from ..tools.registry import ToolRegistry
+from ..tools.file_reader import FileReaderTool
+from ..tools.git_history import GitHistoryTool
+from ..tools.linter import LinterTool
+from ..verification.verifier import DoubleCheckVerifier
+from ..analyzers.language_detector import LanguageDetector
 
 
 class CodeReviewer:
@@ -14,7 +20,8 @@ class CodeReviewer:
         ai_provider,
         context_builder,
         config: Optional[ConfigLoader] = None,
-        cache: Optional[CacheManager] = None
+        cache: Optional[CacheManager] = None,
+        enable_verification: bool = True
     ):
         """Initialize code reviewer
 
@@ -24,6 +31,7 @@ class CodeReviewer:
             context_builder: Context builder
             config: Configuration loader
             cache: Cache manager
+            enable_verification: Enable 2-pass verification with linter (default: True)
         """
         self.platform = platform_adapter
         self.ai_provider = ai_provider
@@ -35,6 +43,27 @@ class CodeReviewer:
             cache_dir=cache_settings.get('cache_location', '.review_cache'),
             ttl_days=cache_settings.get('ttl_days', 7)
         )
+
+        # Initialize language detector
+        self.language_detector = LanguageDetector()
+
+        # Initialize tool system for 2-pass verification
+        self.enable_verification = enable_verification
+        if self.enable_verification:
+            self.tool_registry = ToolRegistry()
+            self.tool_registry.register(FileReaderTool())
+            self.tool_registry.register(GitHistoryTool())
+            self.tool_registry.register(LinterTool())  # NEW: Linter tool!
+            self.verifier = DoubleCheckVerifier(
+                ai_provider=self.ai_provider,
+                tool_registry=self.tool_registry,
+                language_detector=self.language_detector,
+                config=self.config
+            )
+            print("✓ Double-check verification enabled (with linter)")
+        else:
+            self.verifier = None
+            print("⊘ Verification disabled")
 
     def review_pull_request(self, pr_id: str) -> Dict:
         """Review a pull request/merge request
@@ -117,28 +146,76 @@ class CodeReviewer:
         Returns:
             List of review comments
         """
-        # Generate cache key
-        cache_key = self.cache.get_cache_key(f"{filepath}:{diff}:v3")
+        # Generate cache key (v5 for 2-pass with linter)
+        cache_version = "v5-doublecheck-linter" if self.enable_verification else "v3"
+        cache_key = self.cache.get_cache_key(
+            f"{filepath}:{diff}:{cache_version}"
+        )
 
         # Check cache
         cached_review = self.cache.get(cache_key)
         if cached_review:
-            print(f"✓ Using cached review")
+            print("✓ Using cached review")
             return cached_review
+
+        # Detect language for linter
+        language = self.language_detector.detect_language(filepath)
+
+        # Extract changed line numbers from diff
+        changed_lines = self._extract_changed_lines(diff)
 
         # Build context
         print("Building context...")
         context = self.context_builder.build_context(filepath, diff, change)
 
-        # Get AI review
-        print("Requesting AI review...")
-        comments = self.ai_provider.review(context)
+        # Pass 1: Get initial AI review
+        print("Pass 1: Initial AI review...")
+        initial_comments = self.ai_provider.review(context)
+
+        # Pass 2: Double-check verification with linter (if enabled)
+        if self.enable_verification and self.verifier and initial_comments:
+            verified_comments = self.verifier.verify_issues(
+                initial_issues=initial_comments,
+                context=context,
+                filepath=filepath,
+                language=language,
+                changed_lines=changed_lines
+            )
+            comments = verified_comments
+        else:
+            comments = initial_comments
 
         # Cache result
         if comments:
             self.cache.set(cache_key, comments)
 
         return comments
+
+    def _extract_changed_lines(self, diff: str) -> List[int]:
+        """Extract line numbers of changed lines from diff
+
+        Args:
+            diff: Git diff string
+
+        Returns:
+            List of changed line numbers
+        """
+        import re
+        changed_lines = []
+
+        # Parse diff to find changed lines
+        # Format: @@ -old_start,old_count +new_start,new_count @@
+        for line in diff.split('\n'):
+            # Find hunk headers
+            if line.startswith('@@'):
+                match = re.search(r'\+(\d+),?(\d+)?', line)
+                if match:
+                    start = int(match.group(1))
+                    count = int(match.group(2)) if match.group(2) else 1
+                    # Add all lines in this hunk
+                    changed_lines.extend(range(start, start + count))
+
+        return changed_lines
 
     def _should_exclude(self, filepath: str) -> bool:
         """Check if file should be excluded

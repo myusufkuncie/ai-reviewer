@@ -1,13 +1,13 @@
-name: AI Code Review - Go
-# Features: 2-pass verification with automatic golangci-lint integration
+name: AI Code Review - PHP/Laravel
+# Features: 2-pass verification with automatic phpcs linter integration
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
-      - '**.go'
-      - 'go.mod'
-      - 'go.sum'
+      - '**.php'
+      - 'composer.json'
+      - 'composer.lock'
 
 jobs:
   ai-review:
@@ -28,19 +28,18 @@ jobs:
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref }}
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
         with:
-          go-version: '1.21'
-          cache: true
+          php-version: '8.2'
+          tools: composer, phpcs
+          coverage: none
 
-      - name: Verify Go installation
-        run: go version
-
-      - name: Install golangci-lint for 2-pass verification
+      - name: Verify PHP installation
         run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          php --version
+          composer --version
+          phpcs --version
 
       - name: Set up Python for AI Reviewer
         uses: actions/setup-python@v5
@@ -63,13 +62,14 @@ jobs:
           GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
           GITHUB_BASE_REF: ${{ github.event.pull_request.base.sha }}
           GITHUB_HEAD_REF: ${{ github.event.pull_request.head.sha }}
-          REVIEW_LANGUAGE: 'go'
+          REVIEW_LANGUAGE: 'php'
+          REVIEW_FRAMEWORK: 'laravel'
         run: python main_github.py
 
       - name: Upload review cache
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: review-cache-go
+          name: review-cache-php
           path: .review_cache/
           retention-days: 7

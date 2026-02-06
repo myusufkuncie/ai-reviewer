@@ -1,4 +1,5 @@
 name: AI Code Review - Flutter
+# Features: 2-pass verification with automatic dart analyze integration (built-in)
 
 on:
   pull_request:
@@ -35,6 +36,7 @@ jobs:
 
       - name: Flutter doctor
         run: flutter doctor -v
+        # Note: dart analyze is built into Flutter SDK - no separate installation needed!
 
       - name: Set up Python for AI Reviewer
         uses: actions/setup-python@v5

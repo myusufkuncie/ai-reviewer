@@ -1,4 +1,5 @@
 # GitLab CI Template for Python/Django AI Code Review
+# Features: 2-pass verification with automatic pylint integration
 # Include this in your main .gitlab-ci.yml:
 # include:
 #   - local: '.gitlab-ci-ai-review.yml'
@@ -12,6 +13,7 @@ ai-review-python:
     variables:
       - $CI_MERGE_REQUEST_TITLE =~ /^Draft:/
   before_script:
+    - pip install pylint  # Install linter for 2-pass verification
     - git clone https://github.com/myusufkuncie/ai-reviewer.git /tmp/ai-reviewer
     - cd /tmp/ai-reviewer
     - pip install -r requirements.txt

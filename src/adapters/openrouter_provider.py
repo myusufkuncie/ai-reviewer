@@ -112,3 +112,70 @@ class OpenRouterProvider(AIProviderAdapter):
         except Exception as e:
             print(f"✗ Error during review: {e}")
             return []
+
+    def verify_issue(self, verification_prompt: str) -> dict:
+        """Verify a single issue with additional context
+
+        Args:
+            verification_prompt: Prompt with issue and evidence
+
+        Returns:
+            Verification result as dict
+        """
+        VERIFICATION_FAILED = "Verification failed - keeping issue"
+
+        if not self.api_key:
+            print("✗ No API key configured")
+            return {"confirmed": True, "reasoning": "Cannot verify - no API key"}
+
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/ai-reviewer",
+                "X-Title": "AI Code Reviewer",
+            }
+
+            data = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": verification_prompt}],
+                "max_tokens": 1000,  # Shorter response for verification
+                "temperature": 0.2,  # Lower temperature for consistency
+            }
+
+            response = requests.post(
+                self.api_url,
+                headers=headers,
+                json=data,
+                timeout=60
+            )
+
+            if response.status_code != 200:
+                print(f"✗ Verification API returned status {response.status_code}")
+                return {"confirmed": True, "reasoning": VERIFICATION_FAILED}
+
+            result = response.json()
+            response_text = result["choices"][0]["message"]["content"]
+
+            # Extract JSON from response
+            start = response_text.find("{")
+            end = response_text.rfind("}") + 1
+
+            if start >= 0 and end > start:
+                verification_result = json.loads(response_text[start:end])
+                return verification_result
+            else:
+                print("⚠ No valid JSON in verification response")
+                return {"confirmed": True, "reasoning": "Could not parse verification"}
+
+        except requests.exceptions.RequestException as e:
+            print(f"✗ Verification API request failed: {e}")
+            return {"confirmed": True, "reasoning": VERIFICATION_FAILED}
+
+        except json.JSONDecodeError as e:
+            print(f"✗ Failed to parse verification JSON: {e}")
+            return {"confirmed": True, "reasoning": VERIFICATION_FAILED}
+
+        except Exception as e:
+            print(f"✗ Error during verification: {e}")
+            return {"confirmed": True, "reasoning": VERIFICATION_FAILED}

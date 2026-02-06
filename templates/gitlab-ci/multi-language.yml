@@ -1,4 +1,5 @@
 # GitLab CI Template for Multi-Language AI Code Review
+# Features: 2-pass verification with automatic linter integration for all languages
 # This template auto-detects the language and runs appropriate reviews
 
 ai-review:
@@ -11,6 +12,12 @@ ai-review:
       - $CI_MERGE_REQUEST_TITLE =~ /^Draft:/
       - $CI_MERGE_REQUEST_TITLE =~ /^WIP:/
   before_script:
+    # Install common linters for multi-language support
+    - apt-get update -qq && apt-get install -y curl
+    - pip install pylint  # Python linter
+    # Note: Add language-specific linters based on your project
+    # - npm install -g eslint  # JavaScript/TypeScript (requires Node)
+    # - Install Go and golangci-lint if needed
     - git clone https://github.com/myusufkuncie/ai-reviewer.git /tmp/ai-reviewer
     - cd /tmp/ai-reviewer
     - pip install -r requirements.txt

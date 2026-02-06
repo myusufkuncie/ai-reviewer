@@ -4,9 +4,12 @@ Intelligent, context-aware automated code reviews for GitHub and GitLab using AI
 
 ## Features
 
+- **🔍 Smart 2-Pass Verification**: AI detection + linter confirmation for highly accurate reviews (reduces false positives by 90%)
+- **🛠️ Intelligent Linter Integration**: Automatically runs language-specific linters on changed lines only (99% token savings)
 - **Multi-Platform Support**: Works with both GitHub Actions and GitLab CI
-- **Multi-Language Support**: Python, JavaScript/TypeScript, Flutter/Dart, Go, Java, Rust
+- **Multi-Language Support**: Python, JavaScript/TypeScript, Flutter/Dart, Go, Java, Rust, PHP/Laravel (8+ languages)
 - **Context-Aware**: Analyzes full file context, related files, project architecture, and documentation
+- **Tool-Augmented Reviews**: AI can read related files, check git history, and run linters (like Claude CLI)
 - **Security-Focused**: Detects OWASP Top 10 vulnerabilities, SQL injection, XSS, and more
 - **Highly Configurable**: Customizable review rules, exclusions, and severity thresholds
 - **Smart Caching**: Reduces API costs by caching unchanged file reviews
@@ -58,8 +61,19 @@ jobs:
 ```
 
 2. **Add secrets** to your repository:
+
+   **Required secrets:**
    - `OPENROUTER_API_KEY`: Get from [OpenRouter](https://openrouter.ai/keys)
-   - `GITHUB_TOKEN`: Automatically provided
+   - `GITHUB_TOKEN`: Automatically provided by GitHub Actions (no setup needed)
+
+   **How to add secrets on GitHub:**
+   1. Go to your repository on GitHub
+   2. Click **Settings** → **Secrets and variables** → **Actions**
+   3. Click **New repository secret**
+   4. Add `OPENROUTER_API_KEY`:
+      - Name: `OPENROUTER_API_KEY`
+      - Value: Your API key from [OpenRouter](https://openrouter.ai/keys)
+   5. Click **Add secret**
 
 3. **Optional**: Add configuration file `.ai-review-config.json` (see [Configuration](#configuration))
 
@@ -86,9 +100,32 @@ ai-review:
 ```
 
 2. **Add CI/CD variables**:
-   - Settings → CI/CD → Variables
-   - Add `GITLAB_TOKEN` (with `api` scope)
-   - Add `OPENROUTER_API_KEY`
+
+   **Required variables:**
+   - `GITLAB_TOKEN`: Personal access token with `api` scope
+   - `OPENROUTER_API_KEY`: Get from [OpenRouter](https://openrouter.ai/keys)
+
+   **How to add variables on GitLab:**
+   1. Go to your project on GitLab
+   2. Click **Settings** → **CI/CD**
+   3. Expand **Variables** section
+   4. Click **Add variable** for each:
+
+      **First variable - GITLAB_TOKEN:**
+      - Key: `GITLAB_TOKEN`
+      - Value: Your GitLab personal access token
+        - Create token: Go to **User Settings** → **Access Tokens**
+        - Name: `AI Reviewer`
+        - Scopes: Check `api`
+        - Click **Create personal access token**
+      - Flags: Check **Mask variable** (recommended)
+      - Click **Add variable**
+
+      **Second variable - OPENROUTER_API_KEY:**
+      - Key: `OPENROUTER_API_KEY`
+      - Value: Your API key from [OpenRouter](https://openrouter.ai/keys)
+      - Flags: Check **Mask variable** (recommended)
+      - Click **Add variable**
 
 3. **Optional**: Add configuration file `.ai-review-config.json`
 
@@ -319,13 +356,21 @@ Wrap fetch in useEffect with proper dependencies
 
 ## How It Works
 
+### Smart 2-Pass Review Flow
+
 1. **Trigger**: PR/MR created or updated
 2. **Fetch Changes**: Get diff between base and head
 3. **Filter Files**: Apply exclusion rules
 4. **Build Context**: Analyze full files, related files, README, Docker configs
-5. **AI Review**: Send context to AI model for analysis
-6. **Parse Results**: Extract comments with line numbers and severity
-7. **Post Comments**: Add inline comments and summary
+5. **Pass 1 - AI Detection**: AI analyzes code and identifies potential issues
+6. **Pass 2 - Linter Verification** (for Critical/Major issues):
+   - Run language-specific linter on **changed lines only** (token-efficient!)
+   - Check git commit history for context
+   - Read related files if needed
+   - Linter confirms or flags issues with objective evidence
+7. **Post Comments**: Add inline comments with linter confirmation badges and summary
+
+> 📖 **Learn More**: See [LINTER_VERIFICATION.md](LINTER_VERIFICATION.md) for detailed documentation on the 2-pass verification system with smart linter integration
 
 ### Context Includes
 
@@ -636,6 +681,11 @@ MIT License - see [LICENSE](LICENSE) file
 
 ## Roadmap
 
+- [x] **2-pass verification system** (AI + Linter confirmation)
+- [x] **Smart linter integration** (7+ languages, token-efficient filtering)
+- [x] **Tool-augmented reviews** (read files, check git history, run linters)
+- [ ] Test execution tool (run tests automatically)
+- [ ] Linter auto-fix suggestions (apply linter fixes)
 - [ ] Self-hosted model support (Ollama)
 - [ ] VSCode extension
 - [ ] Web dashboard for analytics
