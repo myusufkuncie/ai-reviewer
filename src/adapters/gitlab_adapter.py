@@ -89,6 +89,26 @@ class GitLabAdapter(PlatformAdapter):
         except Exception:
             return None
 
+    def get_directory_tree(self, directory: str, ref: str) -> List[Dict]:
+        """Get directory tree (list of files)"""
+        if not self.project:
+            return []
+
+        try:
+            # Get repository tree for the directory
+            items = self.project.repository_tree(path=directory, ref=ref, recursive=False)
+            return [
+                {
+                    'path': item['path'],
+                    'name': item['name'],
+                    'type': item['type']  # 'tree' for dir, 'blob' for file
+                }
+                for item in items
+            ]
+        except Exception as e:
+            print(f"  Warning: Could not get directory tree for {directory}: {e}")
+            return []
+
     def post_comments(self, mr_iid: str, comments: List[Dict]) -> None:
         """Post review comments to merge request"""
         if not self.project:

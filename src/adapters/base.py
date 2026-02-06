@@ -62,6 +62,19 @@ class PlatformAdapter(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_directory_tree(self, directory: str, ref: str) -> List[Dict]:
+        """Get directory tree (list of files in directory)
+
+        Args:
+            directory: Directory path
+            ref: Git reference (commit SHA, branch, etc.)
+
+        Returns:
+            List of file/directory items
+        """
+        pass
+
 
 class AIProviderAdapter(ABC):
     """Base class for AI provider adapters"""

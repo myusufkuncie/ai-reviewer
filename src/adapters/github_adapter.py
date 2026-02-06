@@ -91,6 +91,29 @@ class GitHubAdapter(PlatformAdapter):
         except Exception:
             return None
 
+    def get_directory_tree(self, directory: str, ref: str) -> List[Dict]:
+        """Get directory tree (list of files)"""
+        if not self.repo:
+            return []
+
+        try:
+            # Get contents of directory at specific ref
+            contents = self.repo.get_contents(directory, ref=ref)
+            if not isinstance(contents, list):
+                contents = [contents]
+
+            return [
+                {
+                    'path': item.path,
+                    'name': item.name,
+                    'type': 'blob' if item.type == 'file' else 'tree'
+                }
+                for item in contents
+            ]
+        except Exception as e:
+            print(f"  Warning: Could not get directory tree for {directory}: {e}")
+            return []
+
     def post_comments(self, pr_number: str, comments: List[Dict]) -> None:
         """Post review comments to pull request"""
         if not self.repo:
