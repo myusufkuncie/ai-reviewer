@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import Tuple, Optional
+import fnmatch
 
 
 def should_exclude_file(filepath: str, exclusions: dict) -> Tuple[bool, Optional[str]]:
@@ -36,16 +37,17 @@ def should_exclude_file(filepath: str, exclusions: dict) -> Tuple[bool, Optional
 
 
 def matches_pattern(filepath: str, pattern: str) -> bool:
-    """Check if filepath matches pattern
+    """Check if filepath matches pattern using glob syntax
 
     Args:
         filepath: File path
-        pattern: Pattern (e.g., *.lock)
+        pattern: Pattern (e.g., *.lock, .ai-review-config*.json)
 
     Returns:
         True if matches
     """
-    if pattern.startswith('*.'):
-        ext = pattern[1:]
-        return filepath.endswith(ext)
-    return pattern in filepath
+    # Get just the filename for matching
+    filename = Path(filepath).name
+
+    # Use fnmatch for glob pattern matching
+    return fnmatch.fnmatch(filename, pattern) or fnmatch.fnmatch(filepath, pattern)

@@ -377,6 +377,7 @@ class ContextBuilder:
 
     def _should_exclude_file(self, filepath: str, exclusions: Dict) -> tuple:
         """Check if file should be excluded."""
+        import fnmatch
         path = Path(filepath)
 
         # Check directories
@@ -390,9 +391,9 @@ class ContextBuilder:
             if filename.startswith(prefix):
                 return True, f"matches excluded prefix: {prefix}"
 
-        # Check file patterns
+        # Check file patterns using fnmatch for glob patterns
         for pattern in exclusions.get('file_patterns', []):
-            if path.match(pattern):
+            if fnmatch.fnmatch(filename, pattern) or fnmatch.fnmatch(filepath, pattern):
                 return True, f"matches excluded pattern: {pattern}"
 
         return False, None

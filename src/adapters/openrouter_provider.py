@@ -10,7 +10,7 @@ from .base import AIProviderAdapter
 class OpenRouterProvider(AIProviderAdapter):
     """Adapter for OpenRouter API"""
 
-    def __init__(self, model: str = "anthropic/claude-sonnet-4.5", max_tokens: int = 4000, temperature: float = 0.3):
+    def __init__(self, model: str = "z-ai/glm-4.5-air", max_tokens: int = 4000, temperature: float = 0.3):
         """Initialize OpenRouter provider
 
         Args:
@@ -62,7 +62,7 @@ class OpenRouterProvider(AIProviderAdapter):
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com/ai-reviewer",
+                "HTTP-Referer": "https://github.com/myusufkuncie/ai-reviewer",
                 "X-Title": "AI Code Reviewer",
             }
 
@@ -132,7 +132,7 @@ class OpenRouterProvider(AIProviderAdapter):
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com/ai-reviewer",
+                "HTTP-Referer": "https://github.com/myusufkuncie/ai-reviewer",
                 "X-Title": "AI Code Reviewer",
             }
 

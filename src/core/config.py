@@ -12,7 +12,7 @@ class ConfigLoader:
     DEFAULT_CONFIG = {
         "enabled": True,
         "ai_provider": "openrouter",
-        "model": "anthropic/claude-sonnet-4.5",
+        "model": "z-ai/glm-4.5-air",
         "max_tokens": 4000,
         "temperature": 0.3,
         "language_specific": {},
@@ -30,7 +30,8 @@ class ConfigLoader:
                 "*.lock", "*.log", "*.pyc", "*.pyo", "*.so", "*.dylib",
                 "*.dll", "*.exe", "*.o", "*.a", "package-lock.json",
                 "yarn.lock", "poetry.lock", "Pipfile.lock", "Gemfile.lock",
-                "*.min.js", "*.min.css", "*.map"
+                "*.min.js", "*.min.css", "*.map", ".ai-review-config*.json",
+                ".gitignore", ".dockerignore"
             ]
         },
         "review_settings": {
@@ -129,7 +130,7 @@ class ConfigLoader:
 
     def get_model(self) -> str:
         """Get AI model name"""
-        return self.get('model', 'anthropic/claude-sonnet-4.5')
+        return self.get('model', 'z-ai/glm-4.5-air')
 
     def get_review_settings(self) -> Dict:
         """Get review settings"""

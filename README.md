@@ -139,7 +139,7 @@ Create `.ai-review-config.json` in your repository root:
 {
   "enabled": true,
   "ai_provider": "openrouter",
-  "model": "anthropic/claude-sonnet-4.5",
+  "model": "z-ai/glm-4.5-air",
   "max_tokens": 4000,
   "temperature": 0.3
 }
@@ -151,7 +151,7 @@ Create `.ai-review-config.json` in your repository root:
 {
   "enabled": true,
   "ai_provider": "openrouter",
-  "model": "anthropic/claude-sonnet-4.5",
+  "model": "z-ai/glm-4.5-air",
   "max_tokens": 4000,
   "temperature": 0.3,
 
@@ -195,7 +195,10 @@ Create `.ai-review-config.json` in your repository root:
       "*.min.js",
       "*.min.css",
       "package-lock.json",
-      "yarn.lock"
+      "yarn.lock",
+      ".ai-review-config*.json",
+      ".gitignore",
+      ".dockerignore"
     ],
     "file_prefixes": [
       "test_",
@@ -395,9 +398,15 @@ Wrap fetch in useEffect with proper dependencies
 ```json
 {
   "ai_provider": "openrouter",
-  "model": "anthropic/claude-sonnet-4.5"
+  "model": "z-ai/glm-4.5-air"
 }
 ```
+
+**Recommended models on OpenRouter**:
+
+- `z-ai/glm-4.5-air` - Fast and cost-effective (default)
+- `anthropic/claude-sonnet-4.5` - High quality, best for security
+- `openai/gpt-4-turbo` - Good balance of quality and speed
 
 **Get API Key**: [OpenRouter Keys](https://openrouter.ai/keys)
 
@@ -437,6 +446,7 @@ Based on average PR with 5 files, 500 lines changed:
 
 | Provider | Model | Cost per Review | Quality |
 |----------|-------|----------------|---------|
+| OpenRouter | GLM-4.5-Air (default) | ~$0.01 | ⭐⭐⭐⭐ |
 | OpenRouter | Claude Sonnet 4.5 | ~$0.10 | ⭐⭐⭐⭐⭐ |
 | OpenRouter | GPT-4 Turbo | ~$0.15 | ⭐⭐⭐⭐ |
 | OpenRouter | Claude Haiku | ~$0.02 | ⭐⭐⭐ |
