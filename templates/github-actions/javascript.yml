@@ -49,7 +49,7 @@ jobs:
 
       - name: Clone AI Reviewer
         run: |
-          git clone https://github.com/YOUR_USERNAME/ai-reviewer.git /tmp/ai-reviewer
+          git clone https://github.com/myusufkuncie/ai-reviewer.git /tmp/ai-reviewer
           cd /tmp/ai-reviewer
           python -m pip install --upgrade pip
           pip install -r requirements.txt

@@ -49,7 +49,7 @@ jobs:
 
       - name: Clone and run AI Review
         run: |
-          git clone https://github.com/YOUR_USERNAME/ai-reviewer.git /tmp/ai-reviewer
+          git clone https://github.com/myusufkuncie/ai-reviewer.git /tmp/ai-reviewer
           cd /tmp/ai-reviewer
           pip install -r requirements.txt
           python main_github.py
@@ -131,7 +131,7 @@ ai-review:
     - merge_requests
   before_script:
     - pip install requests python-gitlab
-    - curl -o ai_reviewer.py https://raw.githubusercontent.com/YOUR_USERNAME/ai-reviewer/main/ai_reviewer.py
+    - curl -o ai_reviewer.py https://raw.githubusercontent.com/myusufkuncie/ai-reviewer/main/ai_reviewer.py
   script:
     - python ai_reviewer.py
   variables:

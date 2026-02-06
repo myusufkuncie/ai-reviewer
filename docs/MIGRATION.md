@@ -293,8 +293,8 @@ Possible causes:
 Need help migrating?
 
 - 📖 Read [ARCHITECTURE.md](ARCHITECTURE.md)
-- 🐛 [Open an issue](https://github.com/YOUR_USERNAME/ai-reviewer/issues)
-- 💬 [Ask in discussions](https://github.com/YOUR_USERNAME/ai-reviewer/discussions)
+- 🐛 [Open an issue](https://github.com/myusufkuncie/ai-reviewer/issues)
+- 💬 [Ask in discussions](https://github.com/myusufkuncie/ai-reviewer/discussions)
 
 ## Timeline
 

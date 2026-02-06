@@ -248,8 +248,8 @@ ai-reviewer/
 
 ### Getting Help
 - 📖 Read the documentation
-- 🐛 [Open an issue](https://github.com/YOUR_USERNAME/ai-reviewer/issues)
-- 💬 [Start a discussion](https://github.com/YOUR_USERNAME/ai-reviewer/discussions)
+- 🐛 [Open an issue](https://github.com/myusufkuncie/ai-reviewer/issues)
+- 💬 [Start a discussion](https://github.com/myusufkuncie/ai-reviewer/discussions)
 
 ### Contributing
 - 🤝 Submit pull requests
@@ -283,4 +283,4 @@ MIT License - see [LICENSE](LICENSE) file
 **Last Updated**: 2026-02-06
 **Maintained by**: AI Code Reviewer Team
 
-For the latest updates, visit: https://github.com/YOUR_USERNAME/ai-reviewer
+For the latest updates, visit: https://github.com/myusufkuncie/ai-reviewer

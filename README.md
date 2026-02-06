@@ -45,7 +45,7 @@ jobs:
 
       - name: Clone AI Reviewer
         run: |
-          git clone https://github.com/YOUR_USERNAME/ai-reviewer.git /tmp/ai-reviewer
+          git clone https://github.com/myusufkuncie/ai-reviewer.git /tmp/ai-reviewer
           cd /tmp/ai-reviewer
           pip install -r requirements.txt
 
@@ -74,7 +74,7 @@ ai-review:
   only:
     - merge_requests
   before_script:
-    - git clone https://github.com/YOUR_USERNAME/ai-reviewer.git /tmp/ai-reviewer
+    - git clone https://github.com/myusufkuncie/ai-reviewer.git /tmp/ai-reviewer
     - cd /tmp/ai-reviewer
     - pip install -r requirements.txt
   script:
@@ -571,7 +571,7 @@ python main_gitlab.py
 
 ```bash
 # Clone repository
-git clone https://github.com/YOUR_USERNAME/ai-reviewer.git
+git clone https://github.com/myusufkuncie/ai-reviewer.git
 cd ai-reviewer
 
 # Install dependencies
@@ -648,8 +648,8 @@ MIT License - see [LICENSE](LICENSE) file
 ## Support
 
 - **Documentation**: [docs.yourproject.com](https://docs.yourproject.com)
-- **Issues**: [GitHub Issues](https://github.com/YOUR_USERNAME/ai-reviewer/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/YOUR_USERNAME/ai-reviewer/discussions)
+- **Issues**: [GitHub Issues](https://github.com/myusufkuncie/ai-reviewer/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/myusufkuncie/ai-reviewer/discussions)
 - **Email**: support@yourorg.com
 
 ## Acknowledgments

@@ -11,7 +11,7 @@ ai-review:
       - $CI_MERGE_REQUEST_TITLE =~ /^Draft:/
       - $CI_MERGE_REQUEST_TITLE =~ /^WIP:/
   before_script:
-    - git clone https://github.com/YOUR_USERNAME/ai-reviewer.git /tmp/ai-reviewer
+    - git clone https://github.com/myusufkuncie/ai-reviewer.git /tmp/ai-reviewer
     - cd /tmp/ai-reviewer
     - pip install -r requirements.txt
   script:

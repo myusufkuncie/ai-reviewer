@@ -10,7 +10,7 @@ Get AI Code Reviewer running in under 5 minutes!
    ```bash
    mkdir -p .github/workflows
    curl -o .github/workflows/ai-review.yml \
-     https://raw.githubusercontent.com/YOUR_USERNAME/ai-reviewer/main/templates/github-actions/multi-language.yml
+     https://raw.githubusercontent.com/myusufkuncie/ai-reviewer/main/templates/github-actions/multi-language.yml
    ```
 
 2. **Add OpenRouter API key**
@@ -32,7 +32,7 @@ Get AI Code Reviewer running in under 5 minutes!
 1. **Add to .gitlab-ci.yml**
    ```yaml
    include:
-     - remote: 'https://raw.githubusercontent.com/YOUR_USERNAME/ai-reviewer/main/templates/gitlab-ci/multi-language.yml'
+     - remote: 'https://raw.githubusercontent.com/myusufkuncie/ai-reviewer/main/templates/gitlab-ci/multi-language.yml'
    ```
 
 2. **Add CI/CD variables**
@@ -54,7 +54,7 @@ Get AI Code Reviewer running in under 5 minutes!
 ### Flutter
 ```bash
 # Clone templates
-git clone https://github.com/YOUR_USERNAME/ai-reviewer.git /tmp/ai-reviewer-setup
+git clone https://github.com/myusufkuncie/ai-reviewer.git /tmp/ai-reviewer-setup
 
 # Copy GitHub workflow
 cp /tmp/ai-reviewer-setup/templates/github-actions/flutter.yml .github/workflows/ai-review.yml
@@ -66,7 +66,7 @@ cp /tmp/ai-reviewer-setup/.ai-review-config.flutter.json .ai-review-config.json
 ### Django
 ```bash
 # Clone templates
-git clone https://github.com/YOUR_USERNAME/ai-reviewer.git /tmp/ai-reviewer-setup
+git clone https://github.com/myusufkuncie/ai-reviewer.git /tmp/ai-reviewer-setup
 
 # Copy GitHub workflow
 cp /tmp/ai-reviewer-setup/templates/github-actions/python-django.yml .github/workflows/ai-review.yml
@@ -78,7 +78,7 @@ cp /tmp/ai-reviewer-setup/.ai-review-config.django.json .ai-review-config.json
 ### Go
 ```bash
 # Clone templates
-git clone https://github.com/YOUR_USERNAME/ai-reviewer.git /tmp/ai-reviewer-setup
+git clone https://github.com/myusufkuncie/ai-reviewer.git /tmp/ai-reviewer-setup
 
 # Copy GitHub workflow
 cp /tmp/ai-reviewer-setup/templates/github-actions/golang.yml .github/workflows/ai-review.yml

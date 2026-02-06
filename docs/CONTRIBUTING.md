@@ -25,7 +25,7 @@ Feature requests are welcome! Please:
 
 1. **Fork the repository**
    ```bash
-   git clone https://github.com/YOUR_USERNAME/ai-reviewer.git
+   git clone https://github.com/myusufkuncie/ai-reviewer.git
    cd ai-reviewer
    ```
 
@@ -66,7 +66,7 @@ Feature requests are welcome! Please:
 
 ```bash
 # Clone repository
-git clone https://github.com/YOUR_USERNAME/ai-reviewer.git
+git clone https://github.com/myusufkuncie/ai-reviewer.git
 cd ai-reviewer
 
 # Create virtual environment
