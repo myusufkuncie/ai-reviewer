@@ -124,22 +124,34 @@ See examples in:
 Create `.gitlab-ci-ai-review.yml`:
 
 ```yaml
-ai-review:
-  stage: test
+ai_code_review:
+  stage: code-review
   image: python:3.11
   only:
     - merge_requests
+  except:
+    variables:
+      - $CI_MERGE_REQUEST_TITLE =~ /^Draft:/
   before_script:
-    - pip install requests python-gitlab
-    - curl -o ai_reviewer.py https://raw.githubusercontent.com/myusufkuncie/ai-reviewer/main/ai_reviewer.py
+    - git clone https://github.com/myusufkuncie/ai-reviewer.git /tmp/ai-reviewer
+    - cd /tmp/ai-reviewer
+    - pip install -r requirements.txt --break-system-packages
   script:
-    - python ai_reviewer.py
+    - cp "$CI_PROJECT_DIR/.ai-review-config.json" /tmp/ai-reviewer/
+    - cd /tmp/ai-reviewer
+    - python main_gitlab.py
   variables:
     GITLAB_TOKEN: $GITLAB_TOKEN
     OPENROUTER_API_KEY: $OPENROUTER_API_KEY
   cache:
+    key: ai-review-cache-${CI_COMMIT_REF_SLUG}
     paths:
       - .review_cache/
+  artifacts:
+    when: always
+    paths:
+      - .review_cache/
+    expire_in: 7 days
   allow_failure: true
 ```
 

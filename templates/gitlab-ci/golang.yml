@@ -1,8 +1,8 @@
 # GitLab CI Template for Go AI Code Review
 # Features: 2-pass verification with automatic golangci-lint integration
 
-ai-review-go:
-  stage: test
+ai_code_review:
+  stage: code-review
   image: golang:1.21
   only:
     - merge_requests
@@ -15,10 +15,11 @@ ai-review-go:
     - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin
     - git clone https://github.com/myusufkuncie/ai-reviewer.git /tmp/ai-reviewer
     - cd /tmp/ai-reviewer
-    - pip3 install -r requirements.txt
+    - pip3 install -r requirements.txt --break-system-packages
     # Verify Go
     - go version
   script:
+    - cp "$CI_PROJECT_DIR/.ai-review-config.json" /tmp/ai-reviewer/
     - cd /tmp/ai-reviewer
     - python3 main_gitlab.py
   variables:
@@ -37,8 +38,3 @@ ai-review-go:
       - .review_cache/
     expire_in: 7 days
   allow_failure: true
-  retry:
-    max: 2
-    when:
-      - api_failure
-      - runner_system_failure

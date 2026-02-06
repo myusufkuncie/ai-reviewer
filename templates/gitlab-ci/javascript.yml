@@ -1,8 +1,8 @@
 # GitLab CI Template for JavaScript/TypeScript AI Code Review
 # Features: 2-pass verification with automatic ESLint integration
 
-ai-review-javascript:
-  stage: test
+ai_code_review:
+  stage: code-review
   image: node:20
   only:
     - merge_requests
@@ -15,11 +15,12 @@ ai-review-javascript:
     - npm install -g eslint  # Install linter for 2-pass verification
     - git clone https://github.com/myusufkuncie/ai-reviewer.git /tmp/ai-reviewer
     - cd /tmp/ai-reviewer
-    - pip3 install -r requirements.txt
+    - pip3 install -r requirements.txt --break-system-packages
     # Verify Node
     - node --version
     - npm --version
   script:
+    - cp "$CI_PROJECT_DIR/.ai-review-config.json" /tmp/ai-reviewer/
     - cd /tmp/ai-reviewer
     - python3 main_gitlab.py
   variables:
@@ -37,8 +38,3 @@ ai-review-javascript:
       - .review_cache/
     expire_in: 7 days
   allow_failure: true
-  retry:
-    max: 2
-    when:
-      - api_failure
-      - runner_system_failure

@@ -58,6 +58,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Copy config file
+        run: |
+          if [ -f .ai-review-config.json ]; then
+            cp .ai-review-config.json /tmp/ai-reviewer/
+          fi
+
       - name: Run AI Code Review
         working-directory: /tmp/ai-reviewer
         env:

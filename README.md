@@ -52,11 +52,21 @@ jobs:
           cd /tmp/ai-reviewer
           pip install -r requirements.txt
 
+      - name: Copy config file
+        run: |
+          if [ -f .ai-review-config.json ]; then
+            cp .ai-review-config.json /tmp/ai-reviewer/
+          fi
+
       - name: Run AI Code Review
         working-directory: /tmp/ai-reviewer
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          GITHUB_HEAD_REF: ${{ github.event.pull_request.head.sha }}
         run: python main_github.py
 ```
 
@@ -82,21 +92,35 @@ jobs:
 1. **Add to `.gitlab-ci.yml`**:
 
 ```yaml
-ai-review:
-  stage: test
+ai_code_review:
+  stage: code-review
   image: python:3.11
   only:
     - merge_requests
+  except:
+    variables:
+      - $CI_MERGE_REQUEST_TITLE =~ /^Draft:/
   before_script:
     - git clone https://github.com/myusufkuncie/ai-reviewer.git /tmp/ai-reviewer
     - cd /tmp/ai-reviewer
-    - pip install -r requirements.txt
+    - pip install -r requirements.txt --break-system-packages
   script:
+    - cp "$CI_PROJECT_DIR/.ai-review-config.json" /tmp/ai-reviewer/
     - cd /tmp/ai-reviewer
     - python main_gitlab.py
   variables:
     GITLAB_TOKEN: $GITLAB_TOKEN
     OPENROUTER_API_KEY: $OPENROUTER_API_KEY
+  cache:
+    key: ai-review-cache-${CI_COMMIT_REF_SLUG}
+    paths:
+      - .review_cache/
+  artifacts:
+    when: always
+    paths:
+      - .review_cache/
+    expire_in: 7 days
+  allow_failure: true
 ```
 
 2. **Add CI/CD variables**:

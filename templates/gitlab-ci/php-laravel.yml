@@ -1,8 +1,8 @@
 # GitLab CI Template for PHP/Laravel AI Code Review
 # Features: 2-pass verification with automatic phpcs integration
 
-ai-review-php:
-  stage: test
+ai_code_review:
+  stage: code-review
   image: php:8.2
   only:
     - merge_requests
@@ -19,8 +19,9 @@ ai-review-php:
     # Install AI Reviewer
     - git clone https://github.com/myusufkuncie/ai-reviewer.git /tmp/ai-reviewer
     - cd /tmp/ai-reviewer
-    - pip3 install -r requirements.txt
+    - pip3 install -r requirements.txt --break-system-packages
   script:
+    - cp "$CI_PROJECT_DIR/.ai-review-config.json" /tmp/ai-reviewer/
     - cd /tmp/ai-reviewer
     - python3 main_gitlab.py
   variables:
@@ -39,8 +40,3 @@ ai-review-php:
       - .review_cache/
     expire_in: 7 days
   allow_failure: true
-  retry:
-    max: 2
-    when:
-      - api_failure
-      - runner_system_failure

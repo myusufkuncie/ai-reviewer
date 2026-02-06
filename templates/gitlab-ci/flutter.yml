@@ -1,8 +1,8 @@
 # GitLab CI Template for Flutter AI Code Review
 # Features: 2-pass verification with automatic dart analyze linter integration
 
-ai-review-flutter:
-  stage: test
+ai_code_review:
+  stage: code-review
   image: cirrusci/flutter:stable
   only:
     - merge_requests
@@ -14,10 +14,11 @@ ai-review-flutter:
     - apt-get update -qq && apt-get install -y python3 python3-pip git
     - git clone https://github.com/myusufkuncie/ai-reviewer.git /tmp/ai-reviewer
     - cd /tmp/ai-reviewer
-    - pip3 install -r requirements.txt
+    - pip3 install -r requirements.txt --break-system-packages
     # Verify Flutter (dart analyze is built-in, no separate install needed)
     - flutter doctor -v
   script:
+    - cp "$CI_PROJECT_DIR/.ai-review-config.json" /tmp/ai-reviewer/
     - cd /tmp/ai-reviewer
     - python3 main_gitlab.py
   variables:
@@ -37,8 +38,3 @@ ai-review-flutter:
       - .review_cache/
     expire_in: 7 days
   allow_failure: true
-  retry:
-    max: 2
-    when:
-      - api_failure
-      - runner_system_failure
