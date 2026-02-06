@@ -528,10 +528,18 @@ class ContextBuilder:
 """
 
         if file_after:
-            context += f"""## Full File AFTER Changes (truncated)
+            # Add line numbers to help AI identify exact lines
+            lines_with_numbers = []
+            for i, line in enumerate(file_after.split('\n')[:100], 1):  # First 100 lines
+                lines_with_numbers.append(f"{i:4d} | {line}")
+
+            numbered_content = '\n'.join(lines_with_numbers)
+            context += f"""## Full File AFTER Changes (with line numbers)
+**IMPORTANT**: When reporting issues, use the line numbers shown below (these match the new file).
+
 ```
-{file_after[:2000]}
-{'...[truncated]...' if len(file_after) > 2000 else ''}
+{numbered_content}
+{'...[truncated after line 100]...' if len(file_after.split('\n')) > 100 else ''}
 ```
 
 """
@@ -585,6 +593,9 @@ Provide your review as a JSON array with format:
     "severity": "critical|major|minor|suggestion"
   }
 ]
+
+**CRITICAL**: The "line" field MUST be the line number from the "Full File AFTER Changes" section above.
+Use the line numbers shown in the format "LINE_NUMBER | code". These line numbers correspond to the new version of the file.
 
 Return empty array [] if code looks good. Be specific and constructive."""
 

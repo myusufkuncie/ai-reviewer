@@ -108,6 +108,8 @@ class GitLabAdapter(PlatformAdapter):
             body = f"{emoji} **{comment['severity'].upper()}**: {comment['comment']}"
 
             try:
+                # GitLab API requires position object with new_line for the line in new version
+                # The line number should correspond to the line in the file after changes
                 mr.discussions.create({
                     "body": body,
                     "position": {
@@ -116,13 +118,14 @@ class GitLabAdapter(PlatformAdapter):
                         "head_sha": mr.diff_refs["head_sha"],
                         "position_type": "text",
                         "new_path": comment['filepath'],
-                        "new_line": comment["line"],
+                        "new_line": comment["line"],  # Line number in new version of file
                         "old_path": comment['filepath'],
                     },
                 })
                 print(f"  ✓ Posted {emoji} comment on {comment['filepath']}:{comment['line']}")
             except Exception as e:
-                print(f"  ✗ Error posting comment: {e}")
+                print(f"  ✗ Error posting comment on {comment['filepath']}:{comment['line']}: {e}")
+                print(f"      Comment: {comment['comment'][:100]}...")
 
     def post_summary(self, mr_iid: str, stats: Dict, comments: List[Dict]) -> None:
         """Post review summary to merge request"""

@@ -113,15 +113,19 @@ class GitHubAdapter(PlatformAdapter):
             body = f"{emoji} **{comment['severity'].upper()}**: {comment['comment']}"
 
             try:
+                # GitHub API requires comments to be on lines that are part of the diff
+                # The 'line' should be the line number in the new version of the file
                 pr.create_review_comment(
                     body=body,
                     commit=commit,
                     path=comment['filepath'],
-                    line=comment["line"]
+                    line=comment["line"],
+                    side="RIGHT"  # RIGHT = new version, LEFT = old version
                 )
                 print(f"  ✓ Posted {emoji} comment on {comment['filepath']}:{comment['line']}")
             except Exception as e:
-                print(f"  ✗ Error posting comment: {e}")
+                print(f"  ✗ Error posting comment on {comment['filepath']}:{comment['line']}: {e}")
+                print(f"      Comment: {comment['comment'][:100]}...")
 
     def post_summary(self, pr_number: str, stats: Dict, comments: List[Dict]) -> None:
         """Post review summary to pull request"""

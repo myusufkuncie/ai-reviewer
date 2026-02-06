@@ -608,6 +608,17 @@ def webhook():
 - Split large PRs
 - Increase timeout in workflow
 
+#### 5. "Comments posted on wrong lines"
+
+**Cause**: AI model providing incorrect line numbers or diff positioning issues
+
+**Solution**:
+
+- The system shows line numbers to the AI from the "after changes" file
+- GitHub API requires comments on lines that are part of the diff
+- If this persists, the AI model may need better context
+- Try using a more capable model (e.g., `anthropic/claude-sonnet-4.5`)
+
 ### Debug Mode
 
 Enable debug logging:
