@@ -534,12 +534,13 @@ class ContextBuilder:
                 lines_with_numbers.append(f"{i:4d} | {line}")
 
             numbered_content = '\n'.join(lines_with_numbers)
+            truncate_msg = '...[truncated after line 100]...' if len(file_after.split('\n')) > 100 else ''
             context += f"""## Full File AFTER Changes (with line numbers)
 **IMPORTANT**: When reporting issues, use the line numbers shown below (these match the new file).
 
 ```
 {numbered_content}
-{'...[truncated after line 100]...' if len(file_after.split('\n')) > 100 else ''}
+{truncate_msg}
 ```
 
 """
@@ -549,10 +550,11 @@ class ContextBuilder:
 
 """
             for rel_file in related_files:
+                truncate_rel = '...[truncated]...' if len(rel_file.get('content', '')) >= 1500 else ''
                 context += f"""### {rel_file['path']} ({rel_file['relevance']} relevance - {rel_file['reason']})
 ```
 {rel_file['content']}
-{'...[truncated]...' if len(rel_file.get('content', '')) >= 1500 else ''}
+{truncate_rel}
 ```
 
 """
