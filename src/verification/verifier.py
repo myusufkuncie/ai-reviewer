@@ -3,6 +3,7 @@
 import json
 from typing import List, Dict, Any, Optional
 from ..tools.registry import ToolRegistry
+from ..utils.timer import StepTimer
 
 
 class DoubleCheckVerifier:
@@ -31,7 +32,8 @@ class DoubleCheckVerifier:
         context: str,
         filepath: str,
         language: str = None,
-        changed_lines: List[int] = None
+        changed_lines: List[int] = None,
+        linter_results: Dict = None
     ) -> List[Dict]:
         """Run 2-pass verification on issues
 
@@ -41,6 +43,7 @@ class DoubleCheckVerifier:
             filepath: File being reviewed
             language: Programming language (optional, will auto-detect)
             changed_lines: List of changed line numbers (for linter filtering)
+            linter_results: Pre-computed linter results to avoid re-running linter
 
         Returns:
             Verified issues (with linter evidence)
@@ -51,6 +54,8 @@ class DoubleCheckVerifier:
         print(f"\n{'='*80}")
         print("DOUBLE-CHECK VERIFICATION STARTED")
         print(f"{'='*80}")
+
+        timer = StepTimer()
 
         # Separate issues by severity
         high_severity_issues = [
@@ -83,27 +88,27 @@ class DoubleCheckVerifier:
             print(f"Severity: {issue.get('severity', 'unknown')}")
             print(f"Message: {issue.get('message', 'N/A')[:80]}...")
             print(f"{'-'*80}")
+            timer.reset_step()
 
             # Pass 2: Gather evidence (linter + git + related files)
             evidence = self._gather_evidence(
-                issue, filepath, language, changed_lines
+                issue, filepath, language, changed_lines,
+                cached_linter_results=linter_results
             )
+            timer.step("  evidence gathered")
 
             # Check if linter confirms the issue
             linter_confirms = self._check_linter_confirmation(issue, evidence)
 
             if linter_confirms:
-                # Issue confirmed by linter - definitely real
                 issue['linter_confirmed'] = True
                 issue['linter_evidence'] = linter_confirms
                 verified_issues.append(issue)
-                print(f"✓ Issue CONFIRMED by linter")
+                timer.step("✓ Issue CONFIRMED by linter")
             else:
-                # No linter confirmation - still might be valid
-                # Keep it but mark as not linter-confirmed
                 issue['linter_confirmed'] = False
                 verified_issues.append(issue)
-                print(f"→ Issue kept (no linter confirmation, but may still be valid)")
+                timer.step("→ Issue kept (no linter confirmation)")
 
         # Combine verified high-severity issues with other issues
         final_issues = verified_issues + other_issues
@@ -122,7 +127,8 @@ class DoubleCheckVerifier:
         issue: Dict,
         filepath: str,
         language: str = None,
-        changed_lines: List[int] = None
+        changed_lines: List[int] = None,
+        cached_linter_results: Dict = None
     ) -> Dict[str, Any]:
         """Pass 2: Gather evidence for an issue
 
@@ -131,10 +137,12 @@ class DoubleCheckVerifier:
             filepath: File being reviewed
             language: Programming language
             changed_lines: List of changed line numbers
+            cached_linter_results: Pre-computed linter results (avoids re-running)
 
         Returns:
             Evidence dictionary
         """
+        etimer = StepTimer()
         print("Pass 2: Gathering evidence...")
         evidence = {
             "git_history": None,
@@ -143,9 +151,18 @@ class DoubleCheckVerifier:
         }
 
         try:
-            # 1. Run linter on changed lines only (TOKEN EFFICIENT!)
-            if language:
-                print(f"  → Running {language} linter on changed lines...")
+            # 1. Use cached linter results or run linter if not available
+            if cached_linter_results is not None:
+                evidence["linter_results"] = cached_linter_results
+                summary = cached_linter_results.get('summary', {})
+                etimer.step(
+                    f"  → Linter (cached): "
+                    f"{summary.get('error', 0)} errors, "
+                    f"{summary.get('warning', 0)} warnings "
+                    f"({cached_linter_results.get('filtered_issues', 0)} issues)"
+                )
+            elif language:
+                etimer.step(f"  → Running {language} linter on changed lines...")
                 linter_result = self.tool_registry.execute_tool(
                     "run_linter",
                     filepath=filepath,
@@ -155,15 +172,17 @@ class DoubleCheckVerifier:
                 if linter_result.success:
                     evidence["linter_results"] = linter_result.data
                     summary = linter_result.data.get('summary', {})
-                    print(f"    Linter: {summary.get('error', 0)} errors, "
-                          f"{summary.get('warning', 0)} warnings "
-                          f"(filtered to {linter_result.data.get('filtered_issues', 0)} issues)")
+                    etimer.step(
+                        f"    Linter: {summary.get('error', 0)} errors, "
+                        f"{summary.get('warning', 0)} warnings "
+                        f"(filtered to {linter_result.data.get('filtered_issues', 0)} issues)"
+                    )
                     print(f"    Token saved: {linter_result.data.get('token_saved', 'N/A')}")
                 else:
-                    print(f"    Linter not available: {linter_result.error}")
+                    etimer.step(f"    Linter not available: {linter_result.error}")
 
             # 2. Get git history for context
-            print("  → Checking git history...")
+            etimer.step("  → Checking git history...")
             git_result = self.tool_registry.execute_tool(
                 "git_history",
                 filepath=filepath,
@@ -171,7 +190,7 @@ class DoubleCheckVerifier:
             )
             if git_result.success:
                 evidence["git_history"] = git_result.data
-                print(f"    Found {git_result.data.get('count', 0)} commits")
+                etimer.step(f"    Found {git_result.data.get('count', 0)} commits")
 
             # 3. Read related files (only if issue mentions them)
             issue_msg = issue.get('message', '').lower()
@@ -179,15 +198,15 @@ class DoubleCheckVerifier:
             potential_files = self._extract_file_references(issue_msg + " " + issue_code)
 
             if potential_files:
-                print(f"  → Reading {len(potential_files)} related files...")
-                for related_file in potential_files[:2]:  # Limit to 2 files for token efficiency
+                etimer.step(f"  → Reading {len(potential_files)} related files...")
+                for related_file in potential_files[:2]:
                     file_result = self.tool_registry.execute_tool(
                         "read_file",
                         filepath=related_file
                     )
                     if file_result.success:
                         evidence["related_files"].append(file_result.data)
-                        print(f"    Read: {related_file}")
+                        etimer.step(f"    Read: {related_file}")
 
         except Exception as e:
             print(f"  ⚠ Error gathering evidence: {e}")

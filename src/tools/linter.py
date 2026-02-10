@@ -3,6 +3,7 @@
 import subprocess
 import json
 import re
+import time
 from typing import Dict, Any, List, Set
 from .base import Tool, ToolResult
 
@@ -201,6 +202,7 @@ class LinterTool(Tool):
         """
         cmd = linter_config['command'] + [filepath]
 
+        _t0 = time.time()
         result = subprocess.run(
             cmd,
             cwd=self.repo_path,
@@ -208,6 +210,7 @@ class LinterTool(Tool):
             text=True,
             timeout=30
         )
+        print(f"  → Linter subprocess: +{time.time() - _t0:.2f}s ({' '.join(cmd[:2])}...)")
 
         # Some linters exit with non-zero when issues found
         # This is expected, so we capture output anyway

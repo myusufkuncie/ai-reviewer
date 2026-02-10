@@ -9,6 +9,7 @@ from ..tools.git_history import GitHistoryTool
 from ..tools.linter import LinterTool
 from ..verification.verifier import DoubleCheckVerifier
 from ..analyzers.language_detector import LanguageDetector
+from ..utils.timer import StepTimer
 
 
 class CodeReviewer:
@@ -166,6 +167,8 @@ class CodeReviewer:
             print("✓ Using cached review")
             return cached_review
 
+        timer = StepTimer()
+
         # Detect language for linter
         language = self.language_detector.detect_language(filepath)
 
@@ -175,7 +178,7 @@ class CodeReviewer:
         # Pass 1: Run linter first (if enabled)
         linter_results = None
         if self.enable_verification and self.tool_registry:
-            print("Pass 1: Running linter...")
+            timer.step("Pass 1: Running linter...")
             linter_tool = self.tool_registry.get_tool("run_linter")
             if linter_tool:
                 result = linter_tool.execute(
@@ -185,31 +188,32 @@ class CodeReviewer:
                 )
                 if result.success and result.data:
                     linter_results = result.data
-                    issue_count = linter_results.get('issue_count', 0)
+                    issue_count = linter_results.get('filtered_issues', 0)
                     if issue_count > 0:
                         msg = f"Linter found {issue_count} issues"
-                        print(f"  → {msg} on changed lines")
+                        timer.step(f"  → {msg} on changed lines")
                     else:
-                        print("  → Linter: no issues found")
+                        timer.step("  → Linter: no issues found")
                 else:
                     message = (
                         result.data.get('message', 'skipped')
                         if result.data else 'skipped'
                     )
-                    print(f"  → Linter: {message}")
+                    timer.step(f"  → Linter: {message}")
 
         # Build context (including linter results if available)
-        print("Building context...")
+        timer.step("Building context...")
         context = self.context_builder.build_context(
             filepath, diff, change, linter_results=linter_results
         )
 
         # Pass 2: AI analyzes with linter context
-        if linter_results and linter_results.get('issue_count', 0) > 0:
-            print("Pass 2: AI analysis with linter context...")
+        if linter_results and linter_results.get('filtered_issues', 0) > 0:
+            timer.step("Pass 2: AI analysis with linter context...")
         else:
-            print("Pass 2: AI analysis...")
+            timer.step("Pass 2: AI analysis...")
         comments = self.ai_provider.review(context)
+        timer.step(f"  → Received {len(comments) if comments else 0} comments")
 
         # Cache result
         if comments:

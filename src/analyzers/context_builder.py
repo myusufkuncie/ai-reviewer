@@ -561,8 +561,8 @@ class ContextBuilder:
 """
 
         # Add linter results if available
-        if linter_results and linter_results.get('issue_count', 0) > 0:
-            context += f"""## Linter Results ({linter_results['issue_count']} issues found on changed lines)
+        if linter_results and linter_results.get('filtered_issues', 0) > 0:
+            context += f"""## Linter Results ({linter_results['filtered_issues']} issues found on changed lines)
 
 The linter ({linter_results.get('linter_used', 'unknown')}) found the following issues:
 
@@ -588,8 +588,8 @@ The linter ({linter_results.get('linter_used', 'unknown')}) found the following 
 
 Review the changes considering:
 """
-        if linter_results and linter_results.get('issue_count', 0) > 0:
-            context += f"""1. **Linter Findings**: The linter found {linter_results['issue_count']} issues. Review each one and provide actionable feedback with context.
+        if linter_results and linter_results.get('filtered_issues', 0) > 0:
+            context += f"""1. **Linter Findings**: The linter found {linter_results['filtered_issues']} issues. Review each one and provide actionable feedback with context.
 2. **Project Context**: Does this align with the project's purpose (from README)?
 3. **Infrastructure**: If Docker files changed, are they consistent and correct?
 4. **Integration**: How do changes integrate with existing code and related files?
@@ -619,7 +619,7 @@ Review the changes considering:
 """
 
         if lang_info['framework']:
-            next_num = 14 if (linter_results and linter_results.get('issue_count', 0) > 0) else 13
+            next_num = 14 if (linter_results and linter_results.get('filtered_issues', 0) > 0) else 13
             context += f"{next_num}. **{lang_info['framework']} Patterns**: Does this follow {lang_info['framework']} best practices?\n"
 
         context += """

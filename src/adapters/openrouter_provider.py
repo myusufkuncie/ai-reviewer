@@ -2,6 +2,7 @@
 
 import os
 import json
+import time
 import requests
 from typing import List, Dict
 from .base import AIProviderAdapter
@@ -74,15 +75,17 @@ class OpenRouterProvider(AIProviderAdapter):
             }
 
             print(f"Calling OpenRouter API...")
+            _t0 = time.time()
             response = requests.post(
                 self.api_url,
                 headers=headers,
                 json=data,
                 timeout=120
             )
+            _api_elapsed = time.time() - _t0
 
             if response.status_code != 200:
-                print(f"✗ API returned status {response.status_code}")
+                print(f"✗ API returned status {response.status_code} (+{_api_elapsed:.2f}s)")
                 print(f"Response: {response.text[:200]}")
                 return []
 
@@ -95,7 +98,7 @@ class OpenRouterProvider(AIProviderAdapter):
 
             if start >= 0 and end > start:
                 comments = json.loads(review_text[start:end])
-                print(f"✓ Received {len(comments)} comments from AI")
+                print(f"✓ Received {len(comments)} comments from AI (+{_api_elapsed:.2f}s)")
                 return comments
             else:
                 print("⚠ No valid JSON found in response")
@@ -143,12 +146,16 @@ class OpenRouterProvider(AIProviderAdapter):
                 "temperature": 0.2,  # Lower temperature for consistency
             }
 
+            print("Calling OpenRouter API (verify)...")
+            _t0 = time.time()
             response = requests.post(
                 self.api_url,
                 headers=headers,
                 json=data,
                 timeout=60
             )
+            _api_elapsed = time.time() - _t0
+            print(f"  → Verify API response: +{_api_elapsed:.2f}s")
 
             if response.status_code != 200:
                 print(f"✗ Verification API returned status {response.status_code}")
