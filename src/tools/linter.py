@@ -102,7 +102,7 @@ class LinterTool(Tool):
             ToolResult with filtered linter issues
         """
         filepath = kwargs.get("filepath")
-        language = kwargs.get("language", "").lower()
+        language = (kwargs.get("language") or "").lower()
         changed_lines = kwargs.get("changed_lines", [])
 
         if not filepath:
