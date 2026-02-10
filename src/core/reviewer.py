@@ -31,7 +31,8 @@ class CodeReviewer:
             context_builder: Context builder
             config: Configuration loader
             cache: Cache manager
-            enable_verification: Enable 2-pass verification with linter (default: True)
+            enable_verification: Enable 2-pass verification with linter
+                (default: True)
         """
         self.platform = platform_adapter
         self.ai_provider = ai_provider
@@ -140,7 +141,9 @@ class CodeReviewer:
 
         return stats
 
-    def _review_file(self, filepath: str, diff: str, change: Dict) -> List[Dict]:
+    def _review_file(
+        self, filepath: str, diff: str, change: Dict
+    ) -> List[Dict]:
         """Review a single file
 
         Args:
@@ -180,19 +183,26 @@ class CodeReviewer:
                     language=language,
                     changed_lines=changed_lines
                 )
-                if result.success and result.output:
-                    linter_results = result.output
+                if result.success and result.data:
+                    linter_results = result.data
                     issue_count = linter_results.get('issue_count', 0)
                     if issue_count > 0:
-                        print(f"  → Linter found {issue_count} issues on changed lines")
+                        msg = f"Linter found {issue_count} issues"
+                        print(f"  → {msg} on changed lines")
                     else:
-                        print(f"  → Linter: no issues found")
+                        print("  → Linter: no issues found")
                 else:
-                    print(f"  → Linter: {result.output.get('message', 'skipped')}")
+                    message = (
+                        result.data.get('message', 'skipped')
+                        if result.data else 'skipped'
+                    )
+                    print(f"  → Linter: {message}")
 
         # Build context (including linter results if available)
         print("Building context...")
-        context = self.context_builder.build_context(filepath, diff, change, linter_results=linter_results)
+        context = self.context_builder.build_context(
+            filepath, diff, change, linter_results=linter_results
+        )
 
         # Pass 2: AI analyzes with linter context
         if linter_results and linter_results.get('issue_count', 0) > 0:
@@ -244,7 +254,11 @@ class CodeReviewer:
         """
         # Hardcoded exclusion for config files (always exclude)
         filename = filepath.split('/')[-1]
-        if filename.startswith('.ai-review-config') and filename.endswith('.json'):
+        config_check = (
+            filename.startswith('.ai-review-config') and
+            filename.endswith('.json')
+        )
+        if config_check:
             return True
 
         exclusions = self.config.get_exclusions()
@@ -271,7 +285,8 @@ class CodeReviewer:
 
         Args:
             filepath: File path
-            pattern: Pattern (e.g., *.lock, .ai-review-config*.json)
+            pattern: Pattern
+                (e.g., *.lock, .ai-review-config*.json)
 
         Returns:
             True if matches
