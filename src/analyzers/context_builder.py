@@ -20,9 +20,14 @@ class ContextBuilder:
         self.platform = platform_adapter
         self.config = config
         self.language_detector = LanguageDetector()
+        self._readme_cache: Dict[str, Optional[Dict]] = {}
+        self._docker_cache: Dict[str, Optional[Dict]] = {}
 
     def get_readme_content(self, ref: str) -> Optional[Dict]:
         """Find and read README file."""
+        if ref in self._readme_cache:
+            return self._readme_cache[ref]
+
         readme_files = [
             'README.md',
             'README.MD',
@@ -37,16 +42,22 @@ class ContextBuilder:
             content = self.platform.get_file_content(readme_file, ref)
             if content:
                 print(f"✓ Found README: {readme_file}")
-                return {
+                result = {
                     'file': readme_file,
                     'content': content[:3000]  # First 3000 chars
                 }
+                self._readme_cache[ref] = result
+                return result
 
         print("⚠ No README found")
+        self._readme_cache[ref] = None
         return None
 
     def get_dockerfile_content(self, ref: str) -> Optional[Dict]:
         """Find and read Dockerfile and docker-compose files."""
+        if ref in self._docker_cache:
+            return self._docker_cache[ref]
+
         docker_files = [
             'Dockerfile',
             'dockerfile',
@@ -80,8 +91,10 @@ class ContextBuilder:
 
         if not docker_info['dockerfiles'] and not docker_info['compose_files']:
             print("⚠ No Docker files found")
+            self._docker_cache[ref] = None
             return None
 
+        self._docker_cache[ref] = docker_info
         return docker_info
 
     def extract_imports_and_functions(self, content: str, filepath: str) -> Dict:
