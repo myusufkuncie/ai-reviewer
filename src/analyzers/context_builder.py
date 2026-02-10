@@ -398,13 +398,14 @@ class ContextBuilder:
 
         return False, None
 
-    def build_context(self, filepath: str, diff: str, change: Dict) -> str:
+    def build_context(self, filepath: str, diff: str, change: Dict, linter_results: Dict = None) -> str:
         """Build comprehensive review context for a file
 
         Args:
             filepath: Path to file
             diff: File diff
             change: Change metadata with base_sha and head_sha
+            linter_results: Optional linter results to include in context
 
         Returns:
             Formatted context string for AI
@@ -559,6 +560,24 @@ class ContextBuilder:
 
 """
 
+        # Add linter results if available
+        if linter_results and linter_results.get('issue_count', 0) > 0:
+            context += f"""## Linter Results ({linter_results['issue_count']} issues found on changed lines)
+
+The linter ({linter_results.get('linter_used', 'unknown')}) found the following issues:
+
+"""
+            for issue in linter_results.get('issues', []):
+                context += f"""**Line {issue['line']}**: {issue['severity'].upper()} - {issue['message']}
+"""
+                if issue.get('rule'):
+                    context += f"  Rule: {issue['rule']}\n"
+
+            context += """
+**Note**: Consider these linter findings in your review. If the linter flagged an issue, verify it's a real problem and provide context on how to fix it.
+
+"""
+
         context += f"""## DIFF (Actual Changes)
 ```diff
 {diff}
@@ -568,7 +587,24 @@ class ContextBuilder:
 ## Review Instructions
 
 Review the changes considering:
-1. **Project Context**: Does this align with the project's purpose (from README)?
+"""
+        if linter_results and linter_results.get('issue_count', 0) > 0:
+            context += f"""1. **Linter Findings**: The linter found {linter_results['issue_count']} issues. Review each one and provide actionable feedback with context.
+2. **Project Context**: Does this align with the project's purpose (from README)?
+3. **Infrastructure**: If Docker files changed, are they consistent and correct?
+4. **Integration**: How do changes integrate with existing code and related files?
+5. **Breaking Changes**: Could this break existing functionality or APIs?
+6. **Impact**: Given the scope ({impact['scope']}), are proper safeguards in place?
+7. **Patterns**: Does this follow project patterns and conventions?
+8. **Dependencies**: Are import changes and dependencies handled correctly?
+9. **Testing**: Should this change have corresponding tests?
+10. **Security**: Any security implications from the changes?
+11. **Performance**: Any performance concerns?
+12. **Code Quality**: Clean, maintainable, and well-structured?
+13. **{lang_info['language']} Best Practices**: Does this follow {lang_info['language']} conventions?
+"""
+        else:
+            context += f"""1. **Project Context**: Does this align with the project's purpose (from README)?
 2. **Infrastructure**: If Docker files changed, are they consistent and correct?
 3. **Integration**: How do changes integrate with existing code and related files?
 4. **Breaking Changes**: Could this break existing functionality or APIs?
@@ -583,7 +619,8 @@ Review the changes considering:
 """
 
         if lang_info['framework']:
-            context += f"13. **{lang_info['framework']} Patterns**: Does this follow {lang_info['framework']} best practices?\n"
+            next_num = 14 if (linter_results and linter_results.get('issue_count', 0) > 0) else 13
+            context += f"{next_num}. **{lang_info['framework']} Patterns**: Does this follow {lang_info['framework']} best practices?\n"
 
         context += """
 Provide your review as a JSON array with format:

@@ -389,13 +389,16 @@ Wrap fetch in useEffect with proper dependencies
 2. **Fetch Changes**: Get diff between base and head
 3. **Filter Files**: Apply exclusion rules
 4. **Build Context**: Analyze full files, related files, README, Docker configs
-5. **Pass 1 - AI Detection**: AI analyzes code and identifies potential issues
-6. **Pass 2 - Linter Verification** (for Critical/Major issues):
+5. **Pass 1 - Linter Analysis**:
    - Run language-specific linter on **changed lines only** (token-efficient!)
-   - Check git commit history for context
-   - Read related files if needed
-   - Linter confirms or flags issues with objective evidence
-7. **Post Comments**: Add inline comments with linter confirmation badges and summary
+   - Detect syntax errors, style violations, security issues
+   - Filter results to only changed lines
+6. **Pass 2 - AI Analysis with Linter Context**:
+   - AI reviews code with linter findings included
+   - Provides detailed explanations and fixes for linter issues
+   - Catches logic errors and design issues that linters miss
+   - Combines linter objectivity with AI's contextual understanding
+7. **Post Comments**: Add inline comments with detailed feedback and summary
 
 > 📖 **Learn More**: See [LINTER_VERIFICATION.md](LINTER_VERIFICATION.md) for detailed documentation on the 2-pass verification system with smart linter integration
 

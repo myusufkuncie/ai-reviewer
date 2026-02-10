@@ -151,8 +151,8 @@ class CodeReviewer:
         Returns:
             List of review comments
         """
-        # Generate cache key (v5 for 2-pass with linter)
-        cache_version = "v5-doublecheck-linter" if self.enable_verification else "v3"
+        # Generate cache key (v6 for linter-first approach)
+        cache_version = "v6-linter-first" if self.enable_verification else "v3"
         cache_key = self.cache.get_cache_key(
             f"{filepath}:{diff}:{cache_version}"
         )
@@ -169,26 +169,37 @@ class CodeReviewer:
         # Extract changed line numbers from diff
         changed_lines = self._extract_changed_lines(diff)
 
-        # Build context
+        # Pass 1: Run linter first (if enabled)
+        linter_results = None
+        if self.enable_verification and self.tool_registry:
+            print("Pass 1: Running linter...")
+            linter_tool = self.tool_registry.get_tool("run_linter")
+            if linter_tool:
+                result = linter_tool.execute(
+                    filepath=filepath,
+                    language=language,
+                    changed_lines=changed_lines
+                )
+                if result.success and result.output:
+                    linter_results = result.output
+                    issue_count = linter_results.get('issue_count', 0)
+                    if issue_count > 0:
+                        print(f"  → Linter found {issue_count} issues on changed lines")
+                    else:
+                        print(f"  → Linter: no issues found")
+                else:
+                    print(f"  → Linter: {result.output.get('message', 'skipped')}")
+
+        # Build context (including linter results if available)
         print("Building context...")
-        context = self.context_builder.build_context(filepath, diff, change)
+        context = self.context_builder.build_context(filepath, diff, change, linter_results=linter_results)
 
-        # Pass 1: Get initial AI review
-        print("Pass 1: Initial AI review...")
-        initial_comments = self.ai_provider.review(context)
-
-        # Pass 2: Double-check verification with linter (if enabled)
-        if self.enable_verification and self.verifier and initial_comments:
-            verified_comments = self.verifier.verify_issues(
-                initial_issues=initial_comments,
-                context=context,
-                filepath=filepath,
-                language=language,
-                changed_lines=changed_lines
-            )
-            comments = verified_comments
+        # Pass 2: AI analyzes with linter context
+        if linter_results and linter_results.get('issue_count', 0) > 0:
+            print("Pass 2: AI analysis with linter context...")
         else:
-            comments = initial_comments
+            print("Pass 2: AI analysis...")
+        comments = self.ai_provider.review(context)
 
         # Cache result
         if comments:
