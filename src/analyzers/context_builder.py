@@ -652,3 +652,127 @@ Use the line numbers shown in the format "LINE_NUMBER | code". These line number
 Return empty array [] if code looks good. Be specific and constructive."""
 
         return context
+
+    def build_batch_context(self, file_items: List[Dict]) -> str:
+        """Build a single review context for multiple files (batch mode).
+
+        Args:
+            file_items: List of dicts, each with keys:
+                - filepath: str
+                - diff: str
+                - change: dict (with base_sha, head_sha)
+                - linter_results: dict or None
+
+        Returns:
+            Formatted context string covering all files for a single AI call
+        """
+        if not file_items:
+            return ""
+
+        # Use first item's SHAs for shared project context
+        first_change = file_items[0]['change']
+        head_sha = first_change.get('head_sha')
+
+        # Shared project context (fetched once for the whole batch)
+        readme = self.get_readme_content(head_sha)
+        docker_info = self.get_dockerfile_content(head_sha)
+        architecture = self.get_project_architecture(head_sha)
+
+        context = "# BATCH CODE REVIEW\n\n"
+        context += f"Reviewing {len(file_items)} file(s) in this batch.\n\n"
+
+        # Shared README
+        if readme:
+            context += f"## Project Overview (from {readme['file']})\n"
+            context += f"```\n{readme['content']}\n```\n\n"
+
+        # Shared Docker
+        if docker_info:
+            if docker_info.get('dockerfiles'):
+                context += "## Docker Configuration\n"
+                for df in docker_info['dockerfiles']:
+                    context += f"### {df['file']}\n```dockerfile\n{df['content']}\n```\n\n"
+            if docker_info.get('compose_files'):
+                context += "## Docker Compose\n"
+                for cf in docker_info['compose_files']:
+                    context += f"### {cf['file']}\n```yaml\n{cf['content']}\n```\n\n"
+
+        if architecture['language']:
+            context += (
+                f"## Project Architecture\n"
+                f"- Language: {architecture['language']}\n"
+                f"- Framework: {architecture['framework'] or 'None'}\n"
+                f"- Key dependencies: {', '.join(architecture['dependencies'][:5]) or 'None'}\n\n"
+            )
+
+        context += "---\n\n"
+
+        # Per-file sections
+        for idx, item in enumerate(file_items, 1):
+            filepath = item['filepath']
+            diff = item['diff']
+            change = item['change']
+            linter_results = item.get('linter_results')
+
+            base_sha = change.get('base_sha')
+            head_sha = change.get('head_sha')
+
+            lang_info = self.language_detector.get_language_info(filepath, "")
+            file_after = self.platform.get_file_content(filepath, head_sha)
+            file_before = self.platform.get_file_content(filepath, base_sha)
+            file_info_after = self.extract_imports_and_functions(file_after or "", filepath)
+            impact = self.analyze_change_impact(filepath, diff, file_info_after)
+
+            context += f"# FILE {idx}: {filepath}\n\n"
+            context += f"**Language**: {lang_info['language'] or 'Unknown'} | "
+            context += f"**Framework**: {lang_info['framework'] or 'None'} | "
+            context += f"**Change scope**: {impact['scope'].upper()}\n\n"
+
+            if impact['risks']:
+                context += f"**Risks**: {', '.join(impact['risks'])}\n\n"
+
+            if file_info_after.get('imports'):
+                context += "**Imports**: "
+                context += ", ".join(file_info_after['imports'][:5]) + "\n\n"
+
+            if file_before:
+                context += f"### Before (truncated)\n```\n{file_before[:1500]}"
+                context += "\n...[truncated]\n" if len(file_before) > 1500 else "\n"
+                context += "```\n\n"
+
+            if file_after:
+                lines_with_numbers = []
+                for i, line in enumerate(file_after.split('\n')[:100], 1):
+                    lines_with_numbers.append(f"{i:4d} | {line}")
+                numbered = '\n'.join(lines_with_numbers)
+                truncate_msg = '...[truncated after line 100]...' if len(file_after.split('\n')) > 100 else ''
+                context += f"### After (with line numbers)\n```\n{numbered}\n{truncate_msg}\n```\n\n"
+
+            if linter_results and linter_results.get('filtered_issues', 0) > 0:
+                context += f"### Linter Results ({linter_results['filtered_issues']} issues)\n"
+                for issue in linter_results.get('issues', []):
+                    context += f"- Line {issue['line']}: {issue['severity'].upper()} - {issue['message']}\n"
+                    if issue.get('rule'):
+                        context += f"  Rule: {issue['rule']}\n"
+                context += "\n"
+
+            context += f"### Diff\n```diff\n{diff}\n```\n\n"
+            context += "---\n\n"
+
+        context += """## Review Instructions
+
+Review ALL files listed above. For each issue found, include the correct `filepath`.
+
+Return a single flat JSON array for all files combined:
+[
+  {
+    "filepath": "<exact filepath from FILE N header>",
+    "line": <line_number from the After section>,
+    "comment": "<detailed comment>",
+    "severity": "critical|major|minor|suggestion"
+  }
+]
+
+Return empty array [] if all code looks good. Be specific and constructive."""
+
+        return context

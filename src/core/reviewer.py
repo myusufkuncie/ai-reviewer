@@ -9,7 +9,6 @@ from ..tools.git_history import GitHistoryTool
 from ..tools.linter import LinterTool
 from ..verification.verifier import DoubleCheckVerifier
 from ..analyzers.language_detector import LanguageDetector
-from ..utils.timer import StepTimer
 
 
 class CodeReviewer:
@@ -93,34 +92,108 @@ class CodeReviewer:
 
         all_comments = []
 
+        # Separate cached files from files that need AI review
+        pending_items = []  # items to batch-review via AI
+
         for change in changes:
             filepath = change['filepath']
             diff = change['diff']
 
-            # Check exclusions
             if self._should_exclude(filepath):
                 stats['files_excluded'] += 1
                 print(f"⊘ Excluding: {filepath}")
                 continue
 
-            # Skip binary or large files
             if change.get('binary') or len(diff) > 10000:
                 stats['files_skipped'] += 1
                 print(f"⊘ Skipping: {filepath}")
                 continue
 
+            # Check cache first — no API call needed
+            cache_version = (
+                "v6-linter-first" if self.enable_verification else "v3"
+            )
+            cache_key = self.cache.get_cache_key(
+                f"{filepath}:{diff}:{cache_version}"
+            )
+            cached = self.cache.get(cache_key)
+            if cached:
+                print(f"✓ Cache hit: {filepath}")
+                all_comments.extend(cached)
+                stats['total_comments'] += len(cached)
+                stats['files_reviewed'] += 1
+                stats['cache_hits'] += 1
+                continue
+
+            # Run linter (Pass 1) before batching
+            language = self.language_detector.detect_language(filepath)
+            changed_lines = self._extract_changed_lines(diff)
+            linter_results = None
+
+            if self.enable_verification and self.tool_registry:
+                linter_tool = self.tool_registry.get_tool("run_linter")
+                if linter_tool:
+                    result = linter_tool.execute(
+                        filepath=filepath,
+                        language=language,
+                        changed_lines=changed_lines,
+                    )
+                    if result.success and result.data:
+                        linter_results = result.data
+                        count = linter_results.get('filtered_issues', 0)
+                        if count > 0:
+                            print(
+                                f"  → Linter: {count} issues in {filepath}"
+                            )
+                        else:
+                            print(f"  → Linter: no issues in {filepath}")
+
+            pending_items.append({
+                'filepath': filepath,
+                'diff': diff,
+                'change': change,
+                'linter_results': linter_results,
+                'cache_key': cache_key,
+            })
+
+        # Batch-review pending files in chunks
+        if pending_items:
+            batch_size = self.config.get('batch_size', 3)
+            total = len(pending_items)
+            chunks = [
+                pending_items[i:i + batch_size]
+                for i in range(0, total, batch_size)
+            ]
             print(f"\n{'='*80}")
-            print(f"Reviewing: {filepath}")
+            print(
+                f"AI review: {total} file(s) in"
+                f" {len(chunks)} batch(es) of up to {batch_size}"
+            )
             print(f"{'='*80}")
 
-            # Review file
-            comments = self._review_file(filepath, diff, change)
+            for chunk_idx, chunk in enumerate(chunks, 1):
+                filenames = ', '.join(item['filepath'] for item in chunk)
+                print(f"\nBatch {chunk_idx}/{len(chunks)}: {filenames}")
 
-            if comments:
-                all_comments.extend(comments)
-                stats['total_comments'] += len(comments)
+                batch_context = self.context_builder.build_batch_context(
+                    chunk
+                )
+                comments = self.ai_provider.review_batch(batch_context)
 
-            stats['files_reviewed'] += 1
+                # Map comments back to their files and cache each
+                comments_by_file: Dict[str, list] = {}
+                for c in (comments or []):
+                    fp = c.get('filepath', '')
+                    comments_by_file.setdefault(fp, []).append(c)
+
+                for item in chunk:
+                    fp = item['filepath']
+                    file_comments = comments_by_file.get(fp, [])
+                    if file_comments:
+                        self.cache.set(item['cache_key'], file_comments)
+                        all_comments.extend(file_comments)
+                        stats['total_comments'] += len(file_comments)
+                    stats['files_reviewed'] += 1
 
         # Post comments to platform
         print(f"\n{'='*80}")
@@ -141,85 +214,6 @@ class CodeReviewer:
         print(f"{'='*80}\n")
 
         return stats
-
-    def _review_file(
-        self, filepath: str, diff: str, change: Dict
-    ) -> List[Dict]:
-        """Review a single file
-
-        Args:
-            filepath: Path to file
-            diff: File diff
-            change: Change data
-
-        Returns:
-            List of review comments
-        """
-        # Generate cache key (v6 for linter-first approach)
-        cache_version = "v6-linter-first" if self.enable_verification else "v3"
-        cache_key = self.cache.get_cache_key(
-            f"{filepath}:{diff}:{cache_version}"
-        )
-
-        # Check cache
-        cached_review = self.cache.get(cache_key)
-        if cached_review:
-            print("✓ Using cached review")
-            return cached_review
-
-        timer = StepTimer()
-
-        # Detect language for linter
-        language = self.language_detector.detect_language(filepath)
-
-        # Extract changed line numbers from diff
-        changed_lines = self._extract_changed_lines(diff)
-
-        # Pass 1: Run linter first (if enabled)
-        linter_results = None
-        if self.enable_verification and self.tool_registry:
-            timer.step("Pass 1: Running linter...")
-            linter_tool = self.tool_registry.get_tool("run_linter")
-            if linter_tool:
-                result = linter_tool.execute(
-                    filepath=filepath,
-                    language=language,
-                    changed_lines=changed_lines
-                )
-                if result.success and result.data:
-                    linter_results = result.data
-                    issue_count = linter_results.get('filtered_issues', 0)
-                    if issue_count > 0:
-                        msg = f"Linter found {issue_count} issues"
-                        timer.step(f"  → {msg} on changed lines")
-                    else:
-                        timer.step("  → Linter: no issues found")
-                else:
-                    message = (
-                        result.data.get('message', 'skipped')
-                        if result.data else 'skipped'
-                    )
-                    timer.step(f"  → Linter: {message}")
-
-        # Build context (including linter results if available)
-        timer.step("Building context...")
-        context = self.context_builder.build_context(
-            filepath, diff, change, linter_results=linter_results
-        )
-
-        # Pass 2: AI analyzes with linter context
-        if linter_results and linter_results.get('filtered_issues', 0) > 0:
-            timer.step("Pass 2: AI analysis with linter context...")
-        else:
-            timer.step("Pass 2: AI analysis...")
-        comments = self.ai_provider.review(context)
-        timer.step(f"  → Received {len(comments) if comments else 0} comments")
-
-        # Cache result
-        if comments:
-            self.cache.set(cache_key, comments)
-
-        return comments
 
     def _extract_changed_lines(self, diff: str) -> List[int]:
         """Extract line numbers of changed lines from diff
@@ -302,4 +296,7 @@ class CodeReviewer:
         filename = Path(filepath).name
 
         # Use fnmatch for glob pattern matching
-        return fnmatch.fnmatch(filename, pattern) or fnmatch.fnmatch(filepath, pattern)
+        return (
+            fnmatch.fnmatch(filename, pattern)
+            or fnmatch.fnmatch(filepath, pattern)
+        )

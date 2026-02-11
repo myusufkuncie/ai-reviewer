@@ -7,11 +7,21 @@ import requests
 from typing import List, Dict
 from .base import AIProviderAdapter
 
+_NO_API_KEY_MSG = "✗ No API key configured"
+_CONTENT_TYPE = "application/json"
+_HTTP_REFERER = "https://github.com/myusufkuncie/ai-reviewer"
+_X_TITLE = "AI Code Reviewer"
+
 
 class OpenRouterProvider(AIProviderAdapter):
     """Adapter for OpenRouter API"""
 
-    def __init__(self, model: str = "z-ai/glm-4.5-air", max_tokens: int = 4000, temperature: float = 0.3):
+    def __init__(
+        self,
+        model: str = "z-ai/glm-4.5-air",
+        max_tokens: int = 4000,
+        temperature: float = 0.3,
+    ):
         """Initialize OpenRouter provider
 
         Args:
@@ -29,6 +39,14 @@ class OpenRouterProvider(AIProviderAdapter):
 
         if not self.api_key:
             print("✗ OPENROUTER_API_KEY not set!")
+
+    def _build_headers(self) -> Dict:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": _CONTENT_TYPE,
+            "HTTP-Referer": _HTTP_REFERER,
+            "X-Title": _X_TITLE,
+        }
 
     def test_connection(self) -> bool:
         """Test connection to OpenRouter"""
@@ -56,17 +74,10 @@ class OpenRouterProvider(AIProviderAdapter):
             List of review comments
         """
         if not self.api_key:
-            print("✗ No API key configured")
+            print(_NO_API_KEY_MSG)
             return []
 
         try:
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com/myusufkuncie/ai-reviewer",
-                "X-Title": "AI Code Reviewer",
-            }
-
             data = {
                 "model": self.model,
                 "messages": [{"role": "user", "content": context}],
@@ -74,18 +85,21 @@ class OpenRouterProvider(AIProviderAdapter):
                 "temperature": self.temperature,
             }
 
-            print(f"Calling OpenRouter API...")
+            print("Calling OpenRouter API...")
             _t0 = time.time()
             response = requests.post(
                 self.api_url,
-                headers=headers,
+                headers=self._build_headers(),
                 json=data,
-                timeout=120
+                timeout=(10, 120),
             )
             _api_elapsed = time.time() - _t0
 
             if response.status_code != 200:
-                print(f"✗ API returned status {response.status_code} (+{_api_elapsed:.2f}s)")
+                print(
+                    f"✗ API returned status {response.status_code}"
+                    f" (+{_api_elapsed:.2f}s)"
+                )
                 print(f"Response: {response.text[:200]}")
                 return []
 
@@ -98,7 +112,10 @@ class OpenRouterProvider(AIProviderAdapter):
 
             if start >= 0 and end > start:
                 comments = json.loads(review_text[start:end])
-                print(f"✓ Received {len(comments)} comments from AI (+{_api_elapsed:.2f}s)")
+                print(
+                    f"✓ Received {len(comments)} comments from AI"
+                    f" (+{_api_elapsed:.2f}s)"
+                )
                 return comments
             else:
                 print("⚠ No valid JSON found in response")
@@ -116,6 +133,75 @@ class OpenRouterProvider(AIProviderAdapter):
             print(f"✗ Error during review: {e}")
             return []
 
+    def review_batch(self, batch_context: str) -> List[Dict]:
+        """Send a single API call covering multiple files (batch mode).
+
+        Args:
+            batch_context: Pre-built context string from
+                ContextBuilder.build_batch_context()
+
+        Returns:
+            Flat list of review comments across all files in the batch
+        """
+        if not self.api_key:
+            print(_NO_API_KEY_MSG)
+            return []
+
+        try:
+            data = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": batch_context}],
+                "max_tokens": self.max_tokens,
+                "temperature": self.temperature,
+            }
+
+            print("Calling OpenRouter API (batch)...")
+            _t0 = time.time()
+            response = requests.post(
+                self.api_url,
+                headers=self._build_headers(),
+                json=data,
+                timeout=(10, 120),
+            )
+            _api_elapsed = time.time() - _t0
+
+            if response.status_code != 200:
+                print(
+                    f"✗ Batch API returned status {response.status_code}"
+                    f" (+{_api_elapsed:.2f}s)"
+                )
+                print(f"Response: {response.text[:200]}")
+                return []
+
+            result = response.json()
+            review_text = result["choices"][0]["message"]["content"]
+
+            start = review_text.find("[")
+            end = review_text.rfind("]") + 1
+
+            if start >= 0 and end > start:
+                comments = json.loads(review_text[start:end])
+                print(
+                    f"✓ Batch received {len(comments)} comments"
+                    f" (+{_api_elapsed:.2f}s)"
+                )
+                return comments
+            else:
+                print("⚠ No valid JSON found in batch response")
+                return []
+
+        except requests.exceptions.RequestException as e:
+            print(f"✗ Batch API request failed: {e}")
+            return []
+
+        except json.JSONDecodeError as e:
+            print(f"✗ Failed to parse batch JSON response: {e}")
+            return []
+
+        except Exception as e:
+            print(f"✗ Error during batch review: {e}")
+            return []
+
     def verify_issue(self, verification_prompt: str) -> dict:
         """Verify a single issue with additional context
 
@@ -128,20 +214,15 @@ class OpenRouterProvider(AIProviderAdapter):
         VERIFICATION_FAILED = "Verification failed - keeping issue"
 
         if not self.api_key:
-            print("✗ No API key configured")
+            print(_NO_API_KEY_MSG)
             return {"confirmed": True, "reasoning": "Cannot verify - no API key"}
 
         try:
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com/myusufkuncie/ai-reviewer",
-                "X-Title": "AI Code Reviewer",
-            }
-
             data = {
                 "model": self.model,
-                "messages": [{"role": "user", "content": verification_prompt}],
+                "messages": [
+                    {"role": "user", "content": verification_prompt}
+                ],
                 "max_tokens": 1000,  # Shorter response for verification
                 "temperature": 0.2,  # Lower temperature for consistency
             }
@@ -150,15 +231,18 @@ class OpenRouterProvider(AIProviderAdapter):
             _t0 = time.time()
             response = requests.post(
                 self.api_url,
-                headers=headers,
+                headers=self._build_headers(),
                 json=data,
-                timeout=60
+                timeout=(10, 60),
             )
             _api_elapsed = time.time() - _t0
             print(f"  → Verify API response: +{_api_elapsed:.2f}s")
 
             if response.status_code != 200:
-                print(f"✗ Verification API returned status {response.status_code}")
+                print(
+                    f"✗ Verification API returned status"
+                    f" {response.status_code}"
+                )
                 return {"confirmed": True, "reasoning": VERIFICATION_FAILED}
 
             result = response.json()
@@ -173,7 +257,10 @@ class OpenRouterProvider(AIProviderAdapter):
                 return verification_result
             else:
                 print("⚠ No valid JSON in verification response")
-                return {"confirmed": True, "reasoning": "Could not parse verification"}
+                return {
+                    "confirmed": True,
+                    "reasoning": "Could not parse verification",
+                }
 
         except requests.exceptions.RequestException as e:
             print(f"✗ Verification API request failed: {e}")
