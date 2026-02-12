@@ -195,6 +195,12 @@ class CodeReviewer:
                         stats['total_comments'] += len(file_comments)
                     stats['files_reviewed'] += 1
 
+        # Clear previous bot comments before posting new ones
+        print(f"\n{'='*80}")
+        print("Clearing previous bot comments...")
+        print(f"{'='*80}")
+        self.platform.clear_bot_comments(pr_id)
+
         # Post comments to platform
         print(f"\n{'='*80}")
         print("Posting review comments...")

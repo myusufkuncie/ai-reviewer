@@ -5,6 +5,9 @@ import gitlab
 from typing import List, Dict, Optional
 from .base import PlatformAdapter
 
+_BOT_MARKER = "<!-- @kuncie-aireviewer -->"
+_NOT_AUTH = "Not authenticated. Call authenticate() first."
+
 
 class GitLabAdapter(PlatformAdapter):
     """Adapter for GitLab CI/API"""
@@ -19,10 +22,15 @@ class GitLabAdapter(PlatformAdapter):
         print("=" * 80)
         print("GitLab Adapter Initialization")
         print("=" * 80)
-        print(f"GITLAB_TOKEN: {'✓ Set' if self.gitlab_token else '✗ Missing'}")
+        print(
+            f"GITLAB_TOKEN:"
+            f" {'✓ Set' if self.gitlab_token else '✗ Missing'}"
+        )
         print(f"CI_SERVER_URL: {self.ci_server_url or '✗ Missing'}")
         print(f"CI_PROJECT_ID: {self.ci_project_id or '✗ Missing'}")
-        print(f"CI_MERGE_REQUEST_IID: {self.ci_mr_iid or '✗ Missing'}")
+        print(
+            f"CI_MERGE_REQUEST_IID: {self.ci_mr_iid or '✗ Missing'}"
+        )
         print("=" * 80)
 
         self.gl = None
@@ -33,7 +41,10 @@ class GitLabAdapter(PlatformAdapter):
         """Authenticate with GitLab"""
         try:
             print(f"Connecting to GitLab at {self.ci_server_url}...")
-            self.gl = gitlab.Gitlab(url=self.ci_server_url, private_token=self.gitlab_token)
+            self.gl = gitlab.Gitlab(
+                url=self.ci_server_url,
+                private_token=self.gitlab_token,
+            )
 
             print("Authenticating with GitLab...")
             self.gl.auth()
@@ -60,7 +71,7 @@ class GitLabAdapter(PlatformAdapter):
     def get_changes(self, mr_iid: str) -> List[Dict]:
         """Get changes from merge request"""
         if not self.project:
-            raise Exception("Not authenticated. Call authenticate() first.")
+            raise RuntimeError(_NOT_AUTH)
 
         mr = self.project.mergerequests.get(mr_iid)
         changes_data = mr.changes()
@@ -84,7 +95,9 @@ class GitLabAdapter(PlatformAdapter):
             return None
 
         try:
-            file_content = self.project.files.get(file_path=filepath, ref=ref)
+            file_content = self.project.files.get(
+                file_path=filepath, ref=ref
+            )
             return file_content.decode().decode('utf-8')
         except Exception:
             return None
@@ -95,24 +108,31 @@ class GitLabAdapter(PlatformAdapter):
             return []
 
         try:
-            # Get repository tree for the directory
-            items = self.project.repository_tree(path=directory, ref=ref, recursive=False, get_all=True)
+            items = self.project.repository_tree(
+                path=directory,
+                ref=ref,
+                recursive=False,
+                get_all=True,
+            )
             return [
                 {
                     'path': item['path'],
                     'name': item['name'],
-                    'type': item['type']  # 'tree' for dir, 'blob' for file
+                    'type': item['type'],
                 }
                 for item in items
             ]
         except Exception as e:
-            print(f"  Warning: Could not get directory tree for {directory}: {e}")
+            print(
+                f"  Warning: Could not get directory tree"
+                f" for {directory}: {e}"
+            )
             return []
 
     def post_comments(self, mr_iid: str, comments: List[Dict]) -> None:
         """Post review comments to merge request"""
         if not self.project:
-            raise Exception("Not authenticated. Call authenticate() first.")
+            raise RuntimeError(_NOT_AUTH)
 
         mr = self.project.mergerequests.get(mr_iid)
 
@@ -124,12 +144,15 @@ class GitLabAdapter(PlatformAdapter):
         }
 
         for comment in comments:
-            emoji = severity_emoji.get(comment.get("severity", "suggestion"), "💬")
-            body = f"{emoji} **{comment['severity'].upper()}**: {comment['comment']}"
+            severity = comment.get("severity", "suggestion")
+            emoji = severity_emoji.get(severity, "💬")
+            body = (
+                f"{_BOT_MARKER}\n"
+                f"{emoji} **{comment['severity'].upper()}**:"
+                f" {comment['comment']}"
+            )
 
             try:
-                # GitLab API requires position object with new_line for the line in new version
-                # The line number should correspond to the line in the file after changes
                 mr.discussions.create({
                     "body": body,
                     "position": {
@@ -138,27 +161,103 @@ class GitLabAdapter(PlatformAdapter):
                         "head_sha": mr.diff_refs["head_sha"],
                         "position_type": "text",
                         "new_path": comment['filepath'],
-                        "new_line": comment["line"],  # Line number in new version of file
+                        "new_line": comment["line"],
                         "old_path": comment['filepath'],
                     },
                 })
-                print(f"  ✓ Posted {emoji} comment on {comment['filepath']}:{comment['line']}")
+                print(
+                    f"  ✓ Posted {emoji} comment on"
+                    f" {comment['filepath']}:{comment['line']}"
+                )
             except Exception as e:
-                print(f"  ✗ Error posting comment on {comment['filepath']}:{comment['line']}: {e}")
+                print(
+                    f"  ✗ Error posting comment on"
+                    f" {comment['filepath']}:{comment['line']}: {e}"
+                )
                 print(f"      Comment: {comment['comment'][:100]}...")
 
-    def post_summary(self, mr_iid: str, stats: Dict, comments: List[Dict]) -> None:
+    def _delete_discussion_note(
+        self, mr, discussion_id: str, note_id: int
+    ) -> bool:
+        """Delete a single discussion note. Returns True on success."""
+        try:
+            discussion_obj = mr.discussions.get(discussion_id)
+            discussion_obj.notes.delete(note_id)
+            return True
+        except Exception as e:
+            print(f"  ⚠ Could not delete discussion note {note_id}: {e}")
+            return False
+
+    def _delete_mr_note(self, mr, note_id: int) -> bool:
+        """Delete a single MR note. Returns True on success."""
+        try:
+            mr.notes.delete(note_id)
+            return True
+        except Exception as e:
+            print(f"  ⚠ Could not delete note {note_id}: {e}")
+            return False
+
+    def _clear_bot_discussions(self, mr) -> int:
+        """Delete bot inline discussion notes. Returns count deleted."""
+        deleted = 0
+        for discussion in mr.discussions.list(get_all=True):
+            for note in discussion.attributes.get('notes', []):
+                is_bot = _BOT_MARKER in note.get('body', '')
+                if is_bot and self._delete_discussion_note(
+                    mr, discussion.id, note['id']
+                ):
+                    deleted += 1
+        return deleted
+
+    def _clear_bot_notes(self, mr) -> int:
+        """Delete bot general MR notes. Returns count deleted."""
+        deleted = 0
+        for note in mr.notes.list(get_all=True):
+            if _BOT_MARKER in note.body and self._delete_mr_note(
+                mr, note.id
+            ):
+                deleted += 1
+        return deleted
+
+    def clear_bot_comments(self, mr_iid: str) -> int:
+        """Delete all previous bot comments from the merge request"""
+        if not self.project:
+            raise RuntimeError(_NOT_AUTH)
+
+        mr = self.project.mergerequests.get(mr_iid)
+        deleted = (
+            self._clear_bot_discussions(mr) + self._clear_bot_notes(mr)
+        )
+
+        if deleted:
+            print(f"✓ Cleared {deleted} previous bot comment(s)")
+        else:
+            print("⊘ No previous bot comments to clear")
+
+        return deleted
+
+    def post_summary(
+        self, mr_iid: str, stats: Dict, comments: List[Dict]
+    ) -> None:
         """Post review summary to merge request"""
         if not self.project:
-            raise Exception("Not authenticated. Call authenticate() first.")
+            raise RuntimeError(_NOT_AUTH)
 
         mr = self.project.mergerequests.get(mr_iid)
 
         if comments:
-            critical = sum(1 for c in comments if c.get("severity") == "critical")
-            major = sum(1 for c in comments if c.get("severity") == "major")
-            minor = sum(1 for c in comments if c.get("severity") == "minor")
-            suggestions = sum(1 for c in comments if c.get("severity") == "suggestion")
+            critical = sum(
+                1 for c in comments if c.get("severity") == "critical"
+            )
+            major = sum(
+                1 for c in comments if c.get("severity") == "major"
+            )
+            minor = sum(
+                1 for c in comments if c.get("severity") == "minor"
+            )
+            suggestions = sum(
+                1 for c in comments if c.get("severity") == "suggestion"
+            )
 
             summary = f"""## 🤖 AI Code Review Summary
 
@@ -193,5 +292,5 @@ Please review the inline comments for details."""
 
 ✅ **No issues found**. Code looks good!"""
 
-        mr.notes.create({"body": summary})
-        print(f"✓ Posted review summary")
+        mr.notes.create({"body": f"{_BOT_MARKER}\n{summary}"})
+        print("✓ Posted review summary")

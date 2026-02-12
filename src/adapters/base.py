@@ -63,6 +63,18 @@ class PlatformAdapter(ABC):
         pass
 
     @abstractmethod
+    def clear_bot_comments(self, pr_id: str) -> int:
+        """Delete all previous comments posted by this bot on the PR/MR.
+
+        Args:
+            pr_id: Pull/Merge request ID
+
+        Returns:
+            Number of comments deleted
+        """
+        pass
+
+    @abstractmethod
     def get_directory_tree(self, directory: str, ref: str) -> List[Dict]:
         """Get directory tree (list of files in directory)
 
