@@ -158,7 +158,7 @@ class CodeReviewer:
 
         # Batch-review pending files in chunks
         if pending_items:
-            batch_size = self.config.get('batch_size', 3)
+            batch_size = self.config.get('batch_size', 7)
             total = len(pending_items)
             chunks = [
                 pending_items[i:i + batch_size]
