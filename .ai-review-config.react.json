@@ -1,0 +1,93 @@
+{
+  "enabled": true,
+  "ai_provider": "openrouter",
+  "model": "anthropic/claude-sonnet-4.5",
+
+  "language_specific": {
+    "javascript": {
+      "enabled": true,
+      "check_react_hooks": true,
+      "check_typescript": true,
+      "async_best_practices": true,
+      "immutability_checks": true,
+      "performance_checks": true,
+      "focus_areas": [
+        "React hooks rules (dependencies, exhaustive-deps)",
+        "Effect cleanup (return functions in useEffect)",
+        "State management patterns (Context, Redux, Zustand)",
+        "Component composition and prop drilling",
+        "Unnecessary re-renders (useMemo, useCallback, React.memo)",
+        "Key prop in lists",
+        "Controlled vs uncontrolled components",
+        "Event handler patterns",
+        "Accessibility (a11y) - ARIA labels, semantic HTML",
+        "PropTypes or TypeScript type safety",
+        "Async operations in useEffect",
+        "Memory leaks (event listeners, timers, subscriptions)",
+        "Conditional rendering patterns"
+      ]
+    }
+  },
+
+  "exclusions": {
+    "directories": [
+      "node_modules",
+      "build",
+      "dist",
+      "coverage",
+      ".git",
+      "public"
+    ],
+    "file_patterns": [
+      "*.min.js",
+      "*.min.css",
+      "*.map",
+      "*.d.ts",
+      "package-lock.json",
+      "yarn.lock",
+      "pnpm-lock.yaml"
+    ]
+  },
+
+  "review_settings": {
+    "severity_threshold": "minor",
+    "check_performance": true,
+    "check_security": true,
+    "max_comments_per_file": 8
+  },
+
+  "custom_rules": {
+    "patterns": [
+      {
+        "name": "Missing key prop in map",
+        "pattern": "\\.map\\([^)]*=>\\s*<[A-Z]",
+        "severity": "minor",
+        "message": "Ensure each element in a list has a unique 'key' prop."
+      },
+      {
+        "name": "Inline function in JSX",
+        "pattern": "(onClick|onChange|onSubmit)=\\{\\([^)]*\\)\\s*=>",
+        "severity": "suggestion",
+        "message": "Consider extracting inline arrow functions to avoid unnecessary re-renders."
+      },
+      {
+        "name": "Console statements",
+        "pattern": "console\\.(log|debug|info|warn)",
+        "severity": "minor",
+        "message": "Remove console statements or use proper logging in production."
+      },
+      {
+        "name": "Hardcoded API keys",
+        "pattern": "(api[_-]?key|secret|token|password)\\s*[:=]\\s*['\"][^'\"]+['\"]",
+        "severity": "critical",
+        "message": "Potential hardcoded secret. Use environment variables instead."
+      },
+      {
+        "name": "dangerouslySetInnerHTML usage",
+        "pattern": "dangerouslySetInnerHTML",
+        "severity": "major",
+        "message": "Using dangerouslySetInnerHTML can expose your app to XSS attacks. Ensure the content is sanitized."
+      }
+    ]
+  }
+}

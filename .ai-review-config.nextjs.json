@@ -1,0 +1,93 @@
+{
+  "enabled": true,
+  "ai_provider": "openrouter",
+  "model": "anthropic/claude-sonnet-4.5",
+
+  "language_specific": {
+    "javascript": {
+      "enabled": true,
+      "check_react_hooks": true,
+      "check_typescript": true,
+      "async_best_practices": true,
+      "immutability_checks": true,
+      "performance_checks": true,
+      "nextjs_specific": true,
+      "focus_areas": [
+        "React hooks rules (dependencies, effect cleanup)",
+        "Next.js App Router patterns (Server vs Client Components)",
+        "Data fetching patterns (server components, streaming)",
+        "Image optimization (next/image usage)",
+        "Font optimization (next/font usage)",
+        "Metadata and SEO best practices",
+        "Client/Server boundary violations",
+        "Unnecessary 'use client' directives",
+        "API route security and validation",
+        "Environment variable exposure",
+        "Performance (Core Web Vitals)",
+        "Caching strategies (fetch, unstable_cache)",
+        "Route handlers vs Server Actions",
+        "Parallel and Intercepting Routes usage"
+      ]
+    }
+  },
+
+  "exclusions": {
+    "directories": [
+      "node_modules",
+      ".next",
+      "out",
+      "dist",
+      "build",
+      ".vercel",
+      ".turbo",
+      "coverage",
+      ".git"
+    ],
+    "file_patterns": [
+      "*.min.js",
+      "*.min.css",
+      "*.map",
+      "*.d.ts",
+      "next-env.d.ts",
+      "package-lock.json",
+      "yarn.lock",
+      "pnpm-lock.yaml"
+    ]
+  },
+
+  "review_settings": {
+    "severity_threshold": "minor",
+    "check_performance": true,
+    "check_security": true,
+    "max_comments_per_file": 8
+  },
+
+  "custom_rules": {
+    "patterns": [
+      {
+        "name": "Direct image import without next/image",
+        "pattern": "<img\\s+src=",
+        "severity": "minor",
+        "message": "Consider using next/image for automatic image optimization."
+      },
+      {
+        "name": "Missing alt attribute on images",
+        "pattern": "<(img|Image)[^>]*(?<!alt=)",
+        "severity": "minor",
+        "message": "Images should have alt attributes for accessibility."
+      },
+      {
+        "name": "Console statements",
+        "pattern": "console\\.(log|debug|info|warn)",
+        "severity": "minor",
+        "message": "Remove console statements or use proper logging in production."
+      },
+      {
+        "name": "Hardcoded API keys",
+        "pattern": "(api[_-]?key|secret|token|password)\\s*[:=]\\s*['\"][^'\"]+['\"]",
+        "severity": "critical",
+        "message": "Potential hardcoded secret. Use environment variables (NEXT_PUBLIC_ prefix for client-side)."
+      }
+    ]
+  }
+}
