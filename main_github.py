@@ -40,7 +40,7 @@ def main():
     # Initialize AI provider
     ai_provider = OpenRouterProvider(
         model=config.get_model(),
-        max_tokens=config.get('max_tokens', 4000),
+        max_tokens=config.get('max_tokens', 1000000),
         temperature=config.get('temperature', 0.3)
     )
 
