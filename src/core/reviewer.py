@@ -158,7 +158,7 @@ class CodeReviewer:
 
         # Batch-review pending files in chunks
         if pending_items:
-            batch_size = self.config.get('batch_size', 7)
+            batch_size = self.config.get('batch_size', 2)
             # Token budget for a single batch's input context.
             # Keep well below the model's 1M limit to leave room for
             # output tokens and prompt overhead.
