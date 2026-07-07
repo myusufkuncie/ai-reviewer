@@ -13,7 +13,7 @@ class ConfigLoader:
         "enabled": True,
         "ai_provider": "openrouter",
         "model": "z-ai/glm-4.5-air",
-        "max_tokens": 4000,
+        "max_tokens": 1000000,
         "temperature": 0.3,
         "language_specific": {},
         "exclusions": {
