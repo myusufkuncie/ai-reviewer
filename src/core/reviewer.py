@@ -159,25 +159,62 @@ class CodeReviewer:
         # Batch-review pending files in chunks
         if pending_items:
             batch_size = self.config.get('batch_size', 7)
+            # Token budget for a single batch's input context.
+            # Keep well below the model's 1M limit to leave room for
+            # output tokens and prompt overhead.
+            max_input_tokens = self.config.get('max_input_tokens', 800000)
             total = len(pending_items)
-            chunks = [
+            initial_chunks = [
                 pending_items[i:i + batch_size]
                 for i in range(0, total, batch_size)
             ]
             print(f"\n{'='*80}")
             print(
                 f"AI review: {total} file(s) in"
-                f" {len(chunks)} batch(es) of up to {batch_size}"
+                f" {len(initial_chunks)} batch(es) of up to {batch_size}"
+                f" (token budget: {max_input_tokens})"
             )
             print(f"{'='*80}")
 
-            for chunk_idx, chunk in enumerate(chunks, 1):
-                filenames = ', '.join(item['filepath'] for item in chunk)
-                print(f"\nBatch {chunk_idx}/{len(chunks)}: {filenames}")
-
+            # Process chunks as a queue so oversized chunks can be split
+            # in half and re-queued.
+            queue = list(initial_chunks)
+            processed = 0
+            while queue:
+                chunk = queue.pop(0)
                 batch_context = self.context_builder.build_batch_context(
                     chunk
                 )
+                # Rough estimate: ~4 chars per token.
+                estimated_tokens = len(batch_context) // 4
+
+                if estimated_tokens > max_input_tokens and len(chunk) > 1:
+                    mid = len(chunk) // 2
+                    print(
+                        f"\n⚠ Batch of {len(chunk)} file(s) estimated at"
+                        f" ~{estimated_tokens} tokens exceeds budget"
+                        f" ({max_input_tokens}). Splitting into"
+                        f" {mid} + {len(chunk) - mid}."
+                    )
+                    queue.insert(0, chunk[mid:])
+                    queue.insert(0, chunk[:mid])
+                    continue
+
+                if estimated_tokens > max_input_tokens:
+                    print(
+                        f"\n⚠ Single file exceeds token budget"
+                        f" (~{estimated_tokens} tokens):"
+                        f" {chunk[0]['filepath']}. Sending anyway;"
+                        f" API may reject."
+                    )
+
+                processed += 1
+                filenames = ', '.join(item['filepath'] for item in chunk)
+                print(
+                    f"\nBatch {processed} ({len(chunk)} file(s),"
+                    f" ~{estimated_tokens} tokens): {filenames}"
+                )
+
                 comments = self.ai_provider.review_batch(batch_context)
 
                 # Map comments back to their files and cache each
