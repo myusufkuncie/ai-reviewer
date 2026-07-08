@@ -19,14 +19,15 @@ class OpenRouterProvider(AIProviderAdapter):
     def __init__(
         self,
         model: str = "z-ai/glm-4.5-air",
-        max_tokens: int = 4000,
+        max_tokens: int = None,
         temperature: float = 0.3,
     ):
         """Initialize OpenRouter provider
 
         Args:
             model: Model name
-            max_tokens: Maximum tokens in response
+            max_tokens: Maximum tokens in response. None (default) lets the
+                model use its full remaining context window.
             temperature: Temperature for generation
         """
         self.api_key = os.getenv("OPENROUTER_API_KEY")
@@ -81,9 +82,10 @@ class OpenRouterProvider(AIProviderAdapter):
             data = {
                 "model": self.model,
                 "messages": [{"role": "user", "content": context}],
-                "max_tokens": self.max_tokens,
                 "temperature": self.temperature,
             }
+            if self.max_tokens is not None:
+                data["max_tokens"] = self.max_tokens
 
             print("Calling OpenRouter API...")
             _t0 = time.time()
@@ -151,9 +153,10 @@ class OpenRouterProvider(AIProviderAdapter):
             data = {
                 "model": self.model,
                 "messages": [{"role": "user", "content": batch_context}],
-                "max_tokens": self.max_tokens,
                 "temperature": self.temperature,
             }
+            if self.max_tokens is not None:
+                data["max_tokens"] = self.max_tokens
 
             print("Calling OpenRouter API (batch)...")
             _t0 = time.time()
