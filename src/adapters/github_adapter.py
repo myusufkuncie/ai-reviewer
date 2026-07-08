@@ -1,6 +1,7 @@
 """GitHub platform adapter"""
 
 import os
+import time
 from typing import List, Dict, Optional
 from github import Github, GithubException
 from .base import PlatformAdapter
@@ -141,6 +142,10 @@ class GitHubAdapter(PlatformAdapter):
         commits = pr.get_commits()
         commit = commits[commits.totalCount - 1]
 
+        # Small pacing delay to avoid GitHub's "submitted too quickly"
+        # 422 error and secondary rate limits (403).
+        post_delay = float(os.getenv("GITHUB_POST_DELAY", "0.7"))
+
         for comment in comments:
             severity = comment.get("severity", "suggestion")
             emoji = severity_emoji.get(severity, "💬")
@@ -150,25 +155,100 @@ class GitHubAdapter(PlatformAdapter):
                 f" {comment['comment']}"
             )
 
+            self._post_single_comment_with_retry(
+                pr=pr,
+                commit=commit,
+                comment=comment,
+                body=body,
+                emoji=emoji,
+            )
+            time.sleep(post_delay)
+
+    def _post_single_comment_with_retry(
+        self,
+        pr,
+        commit,
+        comment: Dict,
+        body: str,
+        emoji: str,
+        max_retries: int = 4,
+    ) -> None:
+        """Post one review comment with backoff on transient GitHub errors.
+
+        Retries on:
+          - 403 (secondary rate limit): honor Retry-After if present.
+          - 422 "was submitted too quickly": exponential backoff.
+        Does NOT retry on:
+          - 422 "could not be resolved" (line not in diff — permanent).
+        """
+        filepath = comment['filepath']
+        line = comment['line']
+        backoff = 2.0
+
+        for attempt in range(1, max_retries + 1):
             try:
-                # RIGHT = new version, LEFT = old version
                 pr.create_review_comment(
                     body=body,
                     commit=commit,
-                    path=comment['filepath'],
-                    line=comment["line"],
+                    path=filepath,
+                    line=line,
                     side="RIGHT",
                 )
-                print(
-                    f"  ✓ Posted {emoji} comment on"
-                    f" {comment['filepath']}:{comment['line']}"
+                print(f"  ✓ Posted {emoji} comment on {filepath}:{line}")
+                return
+            except GithubException as e:
+                status = getattr(e, "status", None)
+                msg = str(getattr(e, "data", "") or e)
+
+                if status == 422 and "could not be resolved" in msg:
+                    print(
+                        f"  ✗ Skipped {filepath}:{line} "
+                        f"(line not in diff)"
+                    )
+                    print(
+                        f"      Comment: {comment['comment'][:100]}..."
+                    )
+                    return
+
+                transient = (
+                    status == 403
+                    or (status == 422 and "too quickly" in msg)
                 )
-            except Exception as e:
+                if transient and attempt < max_retries:
+                    retry_after = self._retry_after_seconds(e, default=backoff)
+                    print(
+                        f"  ⏳ {status} on {filepath}:{line}, "
+                        f"retry {attempt}/{max_retries - 1} "
+                        f"in {retry_after:.1f}s"
+                    )
+                    time.sleep(retry_after)
+                    backoff = min(backoff * 2, 30.0)
+                    continue
+
                 print(
-                    f"  ✗ Error posting comment on"
-                    f" {comment['filepath']}:{comment['line']}: {e}"
+                    f"  ✗ Error posting comment on {filepath}:{line}: {e}"
                 )
                 print(f"      Comment: {comment['comment'][:100]}...")
+                return
+            except Exception as e:
+                print(
+                    f"  ✗ Error posting comment on {filepath}:{line}: {e}"
+                )
+                print(f"      Comment: {comment['comment'][:100]}...")
+                return
+
+    def _retry_after_seconds(
+        self, exc: GithubException, default: float
+    ) -> float:
+        """Extract Retry-After header from a GithubException, if present."""
+        headers = getattr(exc, "headers", None) or {}
+        retry_after = headers.get("Retry-After") or headers.get("retry-after")
+        if retry_after:
+            try:
+                return float(retry_after)
+            except (TypeError, ValueError):
+                pass
+        return default
 
     def clear_bot_comments(self, pr_number: str) -> int:
         """Delete all previous bot comments from the pull request"""

@@ -169,6 +169,189 @@ class LinterTool(Tool):
                 error=f"Linter execution failed: {str(e)}"
             )
 
+    def execute_batch(
+        self,
+        files: List[Dict],
+        language: str,
+    ) -> Dict[str, Dict]:
+        """Run linter once for multiple files of the same language.
+
+        Args:
+            files: List of {"filepath": str, "changed_lines": List[int]}
+            language: Programming language
+
+        Returns:
+            Dict of {filepath: result_data} where result_data matches the
+            shape returned by execute(). Files with no issues still get an
+            entry so callers can distinguish "linted, clean" from "skipped".
+        """
+        language = (language or "").lower()
+        if not files:
+            return {}
+
+        if language not in self.LINTER_COMMANDS:
+            return {}
+
+        linter_config = self.LINTER_COMMANDS[language]
+        if not self._is_linter_installed(linter_config):
+            return {}
+
+        # Languages whose JSON output includes per-file path attribution
+        # can be linted in a single subprocess call.
+        batchable = {'python', 'javascript', 'typescript', 'php'}
+        if language not in batchable:
+            results = {}
+            for entry in files:
+                result = self.execute(
+                    filepath=entry['filepath'],
+                    language=language,
+                    changed_lines=entry.get('changed_lines', []),
+                )
+                if result.success and result.data:
+                    results[entry['filepath']] = result.data
+            return results
+
+        filepaths = [entry['filepath'] for entry in files]
+        changed_by_file = {
+            entry['filepath']: set(entry.get('changed_lines', []) or [])
+            for entry in files
+        }
+
+        cmd = linter_config['command'] + filepaths
+        _t0 = time.time()
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except Exception as e:
+            print(f"  → Linter batch failed: {e}. Falling back to per-file.")
+            results = {}
+            for entry in files:
+                result = self.execute(
+                    filepath=entry['filepath'],
+                    language=language,
+                    changed_lines=entry.get('changed_lines', []),
+                )
+                if result.success and result.data:
+                    results[entry['filepath']] = result.data
+            return results
+
+        elapsed = time.time() - _t0
+        print(
+            f"  → Linter batch subprocess: +{elapsed:.2f}s"
+            f" ({' '.join(cmd[:2])} × {len(filepaths)} files)"
+        )
+        output = proc.stdout or proc.stderr
+
+        issues_by_file = self._parse_batch_output(output, language)
+
+        results: Dict[str, Dict] = {}
+        for entry in files:
+            filepath = entry['filepath']
+            all_issues = issues_by_file.get(filepath, [])
+            changed_lines = changed_by_file[filepath]
+
+            if changed_lines:
+                filtered = [
+                    i for i in all_issues if i.get('line') in changed_lines
+                ]
+            else:
+                filtered = all_issues
+
+            results[filepath] = {
+                "filepath": filepath,
+                "language": language,
+                "total_issues": len(all_issues),
+                "filtered_issues": len(filtered),
+                "changed_lines_count": (
+                    len(changed_lines) if changed_lines else "all"
+                ),
+                "summary": self._aggregate_issues(filtered),
+                "issues": filtered[:10],
+                "token_saved": (
+                    f"{len(all_issues) - len(filtered)} issues filtered out"
+                ),
+            }
+        return results
+
+    def _parse_batch_output(
+        self, output: str, language: str
+    ) -> Dict[str, List[Dict]]:
+        """Parse batched linter output and group issues by filepath.
+
+        Paths are normalized relative to repo_path so lookups match the
+        filepaths callers passed in.
+        """
+        import os
+
+        grouped: Dict[str, List[Dict]] = {}
+        if not output.strip():
+            return grouped
+
+        def _norm(path: str) -> str:
+            if not path:
+                return path
+            if os.path.isabs(path):
+                try:
+                    return os.path.relpath(path, self.repo_path)
+                except ValueError:
+                    return path
+            return os.path.normpath(path)
+
+        try:
+            if language == 'python':
+                data = json.loads(output)
+                for item in data:
+                    path = _norm(item.get('path', ''))
+                    grouped.setdefault(path, []).append({
+                        'line': item.get('line', 0),
+                        'column': item.get('column', 0),
+                        'severity': self._map_severity(
+                            item.get('type', 'info')
+                        ),
+                        'message': item.get('message', ''),
+                        'rule': item.get('symbol', ''),
+                        'code': item.get('message-id', ''),
+                    })
+            elif language in ('javascript', 'typescript'):
+                data = json.loads(output)
+                for file_result in data:
+                    path = _norm(file_result.get('filePath', ''))
+                    for msg in file_result.get('messages', []):
+                        grouped.setdefault(path, []).append({
+                            'line': msg.get('line', 0),
+                            'column': msg.get('column', 0),
+                            'severity': self._map_severity(
+                                str(msg.get('severity', 1))
+                            ),
+                            'message': msg.get('message', ''),
+                            'rule': msg.get('ruleId', ''),
+                            'code': msg.get('ruleId', ''),
+                        })
+            elif language == 'php':
+                data = json.loads(output)
+                for path, file_data in data.get('files', {}).items():
+                    norm_path = _norm(path)
+                    for msg in file_data.get('messages', []):
+                        grouped.setdefault(norm_path, []).append({
+                            'line': msg.get('line', 0),
+                            'column': msg.get('column', 0),
+                            'severity': self._map_severity(
+                                msg.get('type', 'warning')
+                            ),
+                            'message': msg.get('message', ''),
+                            'rule': msg.get('source', ''),
+                            'code': msg.get('source', ''),
+                        })
+        except Exception as e:
+            print(f"Warning: Failed to parse batched linter output: {e}")
+
+        return grouped
+
     def _is_linter_installed(self, linter_config: Dict) -> bool:
         """Check if linter is installed
 

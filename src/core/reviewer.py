@@ -125,53 +125,37 @@ class CodeReviewer:
                 stats['cache_hits'] += 1
                 continue
 
-            # Run linter (Pass 1) before batching
             language = self.language_detector.detect_language(filepath)
             changed_lines = self._extract_changed_lines(diff)
-            linter_results = None
-
-            if self.enable_verification and self.tool_registry:
-                linter_tool = self.tool_registry.get_tool("run_linter")
-                if linter_tool:
-                    result = linter_tool.execute(
-                        filepath=filepath,
-                        language=language,
-                        changed_lines=changed_lines,
-                    )
-                    if result.success and result.data:
-                        linter_results = result.data
-                        count = linter_results.get('filtered_issues', 0)
-                        if count > 0:
-                            print(
-                                f"  → Linter: {count} issues in {filepath}"
-                            )
-                        else:
-                            print(f"  → Linter: no issues in {filepath}")
 
             pending_items.append({
                 'filepath': filepath,
                 'diff': diff,
                 'change': change,
-                'linter_results': linter_results,
+                'language': language,
+                'changed_lines': changed_lines,
+                'linter_results': None,
                 'cache_key': cache_key,
             })
 
+        # Run linter (Pass 1) in a single batched subprocess per language
+        if self.enable_verification and self.tool_registry and pending_items:
+            self._run_batched_linters(pending_items)
+
         # Batch-review pending files in chunks
         if pending_items:
-            batch_size = self.config.get('batch_size', 2)
             # Token budget for a single batch's input context.
             # Keep well below the model's 1M limit to leave room for
             # output tokens and prompt overhead.
             max_input_tokens = self.config.get('max_input_tokens', 800000)
             total = len(pending_items)
-            initial_chunks = [
-                pending_items[i:i + batch_size]
-                for i in range(0, total, batch_size)
-            ]
+            initial_chunks = self._pack_batches(
+                pending_items, max_input_tokens
+            )
             print(f"\n{'='*80}")
             print(
                 f"AI review: {total} file(s) in"
-                f" {len(initial_chunks)} batch(es) of up to {batch_size}"
+                f" {len(initial_chunks)} batch(es)"
                 f" (token budget: {max_input_tokens})"
             )
             print(f"{'='*80}")
@@ -257,6 +241,85 @@ class CodeReviewer:
         print(f"{'='*80}\n")
 
         return stats
+
+    def _pack_batches(
+        self,
+        items: List[Dict],
+        max_input_tokens: int,
+    ) -> List[List[Dict]]:
+        """Greedy-pack files into batches by estimated token count.
+
+        No hard file-count cap: if everything fits under the budget, we
+        send one batch. Only split when adding the next file would push
+        the estimated batch over the budget.
+
+        The chunk queue in review_pull_request() will still re-split any
+        batch that turns out oversized once context is actually built,
+        so this estimate can be approximate.
+        """
+        # ~4 chars per token; reserve room for shared context
+        # (README, Dockerfile, architecture, prompt scaffolding).
+        chars_per_token = 4
+        shared_context_tokens = 20000
+        budget_chars = (
+            max_input_tokens - shared_context_tokens
+        ) * chars_per_token
+
+        batches: List[List[Dict]] = []
+        current: List[Dict] = []
+        current_chars = 0
+        for item in items:
+            # Per-file overhead: headers, linter block, filepath, etc.
+            item_chars = len(item['diff']) + 2000
+            if current and current_chars + item_chars > budget_chars:
+                batches.append(current)
+                current = [item]
+                current_chars = item_chars
+            else:
+                current.append(item)
+                current_chars += item_chars
+        if current:
+            batches.append(current)
+        return batches
+
+    def _run_batched_linters(self, pending_items: List[Dict]) -> None:
+        """Run linter once per language across all pending items.
+
+        Mutates each item in-place to attach linter_results.
+        """
+        linter_tool = self.tool_registry.get_tool("run_linter")
+        if not linter_tool:
+            return
+
+        by_language: Dict[str, List[Dict]] = {}
+        for item in pending_items:
+            by_language.setdefault(item['language'], []).append(item)
+
+        for language, items in by_language.items():
+            batch_input = [
+                {
+                    'filepath': i['filepath'],
+                    'changed_lines': i['changed_lines'],
+                }
+                for i in items
+            ]
+            results = linter_tool.execute_batch(
+                files=batch_input,
+                language=language,
+            )
+            if not results:
+                continue
+
+            for item in items:
+                data = results.get(item['filepath'])
+                if not data:
+                    continue
+                item['linter_results'] = data
+                count = data.get('filtered_issues', 0)
+                if count > 0:
+                    print(f"  → Linter: {count} issues in {item['filepath']}")
+                else:
+                    print(f"  → Linter: no issues in {item['filepath']}")
 
     def _extract_changed_lines(self, diff: str) -> List[int]:
         """Extract line numbers of changed lines from diff
