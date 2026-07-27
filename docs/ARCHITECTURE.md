@@ -1,402 +1,308 @@
-# Modular Architecture Documentation
+# Architecture Documentation
 
 ## Overview
 
-The AI Code Reviewer has been refactored into a modular, maintainable architecture with clear separation of concerns.
+AI Code Reviewer is built on a modular architecture with a linter-first, batch AI review pipeline and optional 2-pass verification for high-severity findings.
 
 ## Directory Structure
 
-```
+```text
 ai-reviewer/
 ├── src/
-│   ├── __init__.py
-│   ├── core/                   # Core business logic
-│   │   ├── __init__.py
-│   │   ├── config.py          # Configuration management
-│   │   ├── cache.py           # Caching system
-│   │   └── reviewer.py        # Main review orchestrator
+│   ├── core/                       # Business logic
+│   │   ├── config.py              # Configuration management
+│   │   ├── cache.py               # File-based caching
+│   │   └── reviewer.py            # Main review orchestrator
 │   │
-│   ├── adapters/               # External service adapters
-│   │   ├── __init__.py
-│   │   ├── base.py            # Base adapter classes
-│   │   ├── gitlab_adapter.py  # GitLab integration
-│   │   ├── github_adapter.py  # GitHub integration
-│   │   └── openrouter_provider.py  # OpenRouter AI
+│   ├── adapters/                   # External service adapters
+│   │   ├── base.py                # Abstract base classes
+│   │   ├── gitlab_adapter.py      # GitLab API integration
+│   │   ├── github_adapter.py      # GitHub API integration
+│   │   └── openrouter_provider.py # OpenRouter AI provider
 │   │
-│   ├── analyzers/              # Code analysis
-│   │   ├── __init__.py
-│   │   ├── language_detector.py  # Language detection
-│   │   └── context_builder.py    # Context building
+│   ├── analyzers/                  # Code analysis
+│   │   ├── language_detector.py   # Language & framework detection
+│   │   └── context_builder.py     # Batch context builder
 │   │
-│   └── utils/                  # Utility functions
-│       ├── __init__.py
-│       └── file_utils.py      # File operations
+│   ├── tools/                      # Pluggable analysis tools
+│   │   ├── base.py                # Tool interface (Tool, ToolResult)
+│   │   ├── registry.py            # Tool registry & executor
+│   │   ├── linter.py              # Language-specific linter runner
+│   │   ├── file_reader.py         # File content reader tool
+│   │   └── git_history.py         # Git commit history tool
+│   │
+│   ├── verification/              # 2-pass verification
+│   │   └── verifier.py            # DoubleCheckVerifier
+│   │
+│   └── utils/
+│       ├── file_utils.py          # File operations
+│       └── timer.py               # Step timing utility
 │
-├── main_gitlab.py              # GitLab entry point
-├── main_github.py              # GitHub entry point
+├── main_gitlab.py                  # GitLab CI entry point
+├── main_github.py                  # GitHub Actions entry point
 └── requirements.txt
+```
+
+## Review Pipeline
+
+The reviewer runs three sequential phases per PR:
+
+```mermaid
+flowchart TD
+    A[PR/MR Triggered] --> B[Load Config & Init]
+    B --> C[Fetch Changed Files]
+    C --> D{For each file}
+    D -->|excluded or binary| E[Skip]
+    D -->|cache hit| F[Use Cached Result]
+    D -->|needs review| G[Add to Pending Queue]
+    G --> H[Pass 1: Run Linters\nbatched per language]
+    H --> I[Pass 2: Single Batch AI Call\nbuild_batch_context + review_batch]
+    I --> J[Map comments back to files\nCache each file's result]
+    J --> K{enable_verification?}
+    K -->|yes| L[DoubleCheckVerifier\ncritical + major only]
+    K -->|no| M[Clear Previous Bot Comments]
+    L --> M
+    M --> N[Post Inline Comments]
+    N --> O{explainer text?}
+    O -->|yes| P[post_explainer_summary\nExplainer + Quiz]
+    O -->|no| Q[post_summary\nStats only]
 ```
 
 ## Module Descriptions
 
-### Core Modules (`src/core/`)
+### `src/core/reviewer.py` — CodeReviewer
 
-#### config.py - ConfigLoader
-**Purpose**: Load and manage configuration from `.ai-review-config.json`
+Main orchestrator. On `review_pull_request(pr_id)`:
 
-**Key Features**:
-- Default configuration fallback
-- Recursive config merging
-- Dot notation access (`config.get('review_settings.severity_threshold')`)
-- Language-specific settings
-- Exclusion rules
+1. Fetches changes from platform adapter
+2. Filters excluded/binary/oversized files
+3. Checks cache — skips API call for cached files
+4. Groups remaining files into `pending_items`
+5. Runs `_run_batched_linters()` — one subprocess per language group
+6. Calls `context_builder.build_batch_context()` then `ai_provider.review_batch()` — **one API call for all files**
+7. Maps AI comments back to individual files, caches each
+8. Optionally runs `DoubleCheckVerifier` on critical/major issues
+9. Posts inline comments and an explainer summary to the platform
 
-**Usage**:
+Key constructor flag: `enable_verification=True` (default) wires up the full tool registry and verifier.
+
+Cache version key: `"v6-linter-first"` when verification is enabled, `"v3"` otherwise.
+
+### `src/core/config.py` — ConfigLoader
+
+Loads `.ai-review-config.json` and merges with defaults.
+
 ```python
 config = ConfigLoader()
-model = config.get_model()
-exclusions = config.get_exclusions()
+config.get_model()          # → "z-ai/glm-4.5-air" (default)
+config.get_exclusions()     # → {directories, file_prefixes, file_patterns}
+config.get_cache_settings() # → {cache_location, ttl_days}
 ```
 
-#### cache.py - CacheManager
-**Purpose**: Cache review results to reduce API costs
+### `src/core/cache.py` — CacheManager
 
-**Key Features**:
-- MD5-based cache keys
-- TTL-based expiration
-- Automatic cleanup
-- File-based storage
+MD5-based, file-backed cache with TTL expiration.
 
-**Usage**:
 ```python
 cache = CacheManager(cache_dir=".review_cache", ttl_days=7)
-cached = cache.get(cache_key)
-if not cached:
-    result = expensive_operation()
-    cache.set(cache_key, result)
+key = cache.get_cache_key(f"{filepath}:{diff}:v6-linter-first")
+cached = cache.get(key)
+cache.set(key, comments)
 ```
 
-#### reviewer.py - CodeReviewer
-**Purpose**: Orchestrate the review process
+### `src/adapters/openrouter_provider.py` — OpenRouterProvider
 
-**Key Features**:
-- Platform-agnostic review logic
-- Exclusion filtering
-- Statistics tracking
-- Comment aggregation
+Three API methods:
 
-**Usage**:
+| Method | Purpose | Returns |
+| --- | --- | --- |
+| `review(context)` | Single-file review (legacy) | `List[Dict]` comments |
+| `review_batch(batch_context)` | All-files-in-one-call review | `{comments, explainer}` |
+| `verify_issue(prompt)` | Re-verify one issue with evidence | `{confirmed, reasoning, updated_severity}` |
+
+Default model: `z-ai/glm-4.5-air`. Any OpenRouter-hosted model works via config.
+
+### `src/adapters/base.py` — Abstract Interfaces
+
+`PlatformAdapter` requires: `get_changes`, `post_comments`, `post_summary`, `post_explainer_summary`, `clear_bot_comments`.
+
+`AIProviderAdapter` requires: `review`, `review_batch`, `test_connection`.
+
+### `src/analyzers/context_builder.py` — ContextBuilder
+
+`build_batch_context(pending_items, all_pr_filepaths)` builds a single prompt string covering all pending files. Each item's linter results are embedded inline. Also fetches README and Dockerfile for project-level context.
+
+### `src/analyzers/language_detector.py` — LanguageDetector
+
+Extension-based language detection with content-based framework detection. Supports 15+ languages and drives linter selection.
+
+### `src/tools/linter.py` — LinterTool
+
+Runs the appropriate static analysis tool for a language. Key feature: filters output to only the changed line numbers, keeping AI context lean.
+
+Supported linters:
+
+| Language | Primary | Fallback |
+| --- | --- | --- |
+| Python | pylint (JSON) | flake8 |
+| JavaScript | eslint (JSON) | — |
+| TypeScript | eslint (JSON) | — |
+| Dart | dart analyze (JSON) | — |
+| Go | golangci-lint (JSON) | go vet |
+| Rust | cargo clippy (JSON) | — |
+| Java | checkstyle (JSON) | — |
+| PHP | phpcs (JSON) | php -l |
+
+`execute_batch(files, language)` runs one subprocess for all files of that language, minimizing process overhead.
+
+### `src/tools/registry.py` — ToolRegistry
+
+Registers tools by name and dispatches `execute_tool(name, **kwargs)`. Returns a `ToolResult(success, data, error)`.
+
+### `src/tools/base.py` — Tool / ToolResult
+
+Abstract `Tool` base class with `name`, `description`, `parameters`, and `execute(**kwargs)` / `execute_batch(...)`.
+
+### `src/verification/verifier.py` — DoubleCheckVerifier
+
+Runs only on `critical` and `major` severity issues. For each:
+
+1. Uses cached linter results (from Pass 1) to check if the linter flagged the same line
+2. Reads git history of the file (up to 3 commits)
+3. Reads any related files mentioned in the issue text
+4. Marks issues as `linter_confirmed: true/false`
+
+Minor/suggestion issues bypass verification and pass through unchanged.
+
+## Design Patterns
+
+### Adapter Pattern
+
+Platform and AI providers implement abstract interfaces. Swap GitHub ↔ GitLab without touching the reviewer.
+
+### Dependency Injection
+
 ```python
 reviewer = CodeReviewer(
     platform_adapter=platform,
     ai_provider=ai_provider,
-    context_builder=context_builder
-)
-stats = reviewer.review_pull_request(pr_id)
-```
-
-### Adapter Modules (`src/adapters/`)
-
-#### base.py - Base Classes
-**Purpose**: Define interfaces for platform and AI adapters
-
-**Classes**:
-- `PlatformAdapter`: Abstract base for GitHub/GitLab
-- `AIProviderAdapter`: Abstract base for AI providers
-
-**Benefits**:
-- Easy to add new platforms
-- Consistent interface
-- Type safety
-
-#### gitlab_adapter.py - GitLabAdapter
-**Purpose**: GitLab API integration
-
-**Key Methods**:
-- `authenticate()`: Connect to GitLab
-- `get_changes()`: Fetch MR changes
-- `post_comments()`: Post review comments
-- `post_summary()`: Post summary comment
-
-#### github_adapter.py - GitHubAdapter
-**Purpose**: GitHub API integration
-
-**Key Methods**:
-- `authenticate()`: Connect to GitHub
-- `get_changes()`: Fetch PR changes
-- `post_comments()`: Post review comments
-- `post_summary()`: Post summary comment
-
-#### openrouter_provider.py - OpenRouterProvider
-**Purpose**: OpenRouter AI API integration
-
-**Key Methods**:
-- `review()`: Get AI review for context
-- `test_connection()`: Verify API access
-
-### Analyzer Modules (`src/analyzers/`)
-
-#### language_detector.py - LanguageDetector
-**Purpose**: Detect language and framework from files
-
-**Key Features**:
-- Extension-based detection
-- Content-based framework detection
-- Support for 15+ languages
-
-**Usage**:
-```python
-detector = LanguageDetector()
-lang_info = detector.get_language_info('app.py', content)
-# Returns: {'language': 'python', 'framework': 'django'}
-```
-
-#### context_builder.py - ContextBuilder
-**Purpose**: Build comprehensive context for AI review
-
-**Key Features**:
-- File before/after comparison
-- Language-specific instructions
-- Diff formatting
-- Framework-aware prompts
-
-## Design Patterns
-
-### 1. Adapter Pattern
-Used for platform (GitHub/GitLab) and AI provider integration:
-```python
-class PlatformAdapter(ABC):
-    @abstractmethod
-    def get_changes(self, pr_id: str) -> List[Dict]:
-        pass
-```
-
-### 2. Strategy Pattern
-Different review strategies for different languages:
-```python
-lang_info = language_detector.get_language_info(filepath)
-context = context_builder.build_context(lang_info)
-```
-
-### 3. Dependency Injection
-Components are injected rather than hardcoded:
-```python
-reviewer = CodeReviewer(
-    platform_adapter=platform,  # Injected
-    ai_provider=ai_provider,    # Injected
-    context_builder=context     # Injected
+    context_builder=context_builder,
+    enable_verification=True
 )
 ```
 
-## Data Flow
+### Tool Registry (Plugin Pattern)
 
-```
-1. main_gitlab.py / main_github.py
-   ↓
-2. Initialize ConfigLoader
-   ↓
-3. Initialize PlatformAdapter (GitLab/GitHub)
-   ↓
-4. Authenticate with platform
-   ↓
-5. Initialize AIProvider (OpenRouter)
-   ↓
-6. Initialize ContextBuilder
-   ↓
-7. Initialize CacheManager
-   ↓
-8. Create CodeReviewer with dependencies
-   ↓
-9. CodeReviewer.review_pull_request(pr_id)
-   ├─ Get changes from platform
-   ├─ For each file:
-   │  ├─ Check exclusions
-   │  ├─ Check cache
-   │  ├─ Build context
-   │  ├─ Get AI review
-   │  └─ Cache result
-   ├─ Post comments to platform
-   └─ Post summary to platform
-   ↓
-10. Return statistics
-```
-
-## Adding New Features
-
-### Add New Platform (e.g., Bitbucket)
-
-1. Create `src/adapters/bitbucket_adapter.py`:
 ```python
-from .base import PlatformAdapter
-
-class BitbucketAdapter(PlatformAdapter):
-    def authenticate(self) -> bool:
-        # Implement
-        pass
-
-    def get_changes(self, pr_id: str) -> List[Dict]:
-        # Implement
-        pass
-
-    # ... other methods
+registry = ToolRegistry()
+registry.register(LinterTool())
+registry.register(FileReaderTool())
+result = registry.execute_tool("run_linter", filepath="src/foo.py", language="python")
 ```
 
-2. Create `main_bitbucket.py`:
-```python
-from src.adapters import BitbucketAdapter
+### Strategy Pattern
 
-platform = BitbucketAdapter()
-# ... rest of setup
-```
+`LanguageDetector` drives both linter selection and context-building prompt strategy.
 
-### Add New AI Provider (e.g., Anthropic Direct)
+## Configuration
 
-1. Create `src/adapters/anthropic_provider.py`:
-```python
-from .base import AIProviderAdapter
+### Minimal
 
-class AnthropicProvider(AIProviderAdapter):
-    def review(self, context: str) -> List[Dict]:
-        # Call Anthropic API directly
-        pass
-```
-
-2. Update main files to support provider selection:
-```python
-provider_name = config.get_ai_provider()
-if provider_name == "openrouter":
-    ai_provider = OpenRouterProvider(...)
-elif provider_name == "anthropic":
-    ai_provider = AnthropicProvider(...)
-```
-
-### Add New Language Support
-
-1. Update `src/analyzers/language_detector.py`:
-```python
-LANGUAGE_MAP = {
-    # ... existing
-    '.scala': 'scala',
-}
-
-FRAMEWORK_PATTERNS = {
-    'scala': {
-        'play': ['import play.api'],
-        'akka': ['import akka.actor'],
-    }
-}
-```
-
-2. Update language-specific prompts in `context_builder.py`
-
-## Testing
-
-### Unit Tests Structure
-```
-tests/
-├── test_core/
-│   ├── test_config.py
-│   ├── test_cache.py
-│   └── test_reviewer.py
-├── test_adapters/
-│   ├── test_gitlab_adapter.py
-│   ├── test_github_adapter.py
-│   └── test_openrouter.py
-└── test_analyzers/
-    ├── test_language_detector.py
-    └── test_context_builder.py
-```
-
-### Running Tests
-```bash
-# Install dev dependencies
-pip install pytest pytest-cov pytest-mock
-
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=src tests/
-
-# Run specific module
-pytest tests/test_core/test_config.py
-```
-
-## Migration Guide
-
-### From Old ai_reviewer.py
-
-**Old**:
-```python
-# Monolithic class
-reviewer = AICodeReviewer()
-reviewer.post_review()
-```
-
-**New**:
-```python
-# Modular components
-from src.core import ConfigLoader, CodeReviewer
-from src.adapters import GitLabAdapter, OpenRouterProvider
-from src.analyzers import ContextBuilder
-
-config = ConfigLoader()
-platform = GitLabAdapter()
-ai_provider = OpenRouterProvider()
-context_builder = ContextBuilder(platform, config)
-
-reviewer = CodeReviewer(platform, ai_provider, context_builder)
-reviewer.review_pull_request(mr_iid)
-```
-
-## Benefits of Modular Architecture
-
-1. **Separation of Concerns**: Each module has a single responsibility
-2. **Testability**: Easy to unit test individual components
-3. **Extensibility**: Add new platforms/providers without changing core
-4. **Maintainability**: Changes isolated to specific modules
-5. **Reusability**: Components can be used independently
-6. **Type Safety**: Clear interfaces with abstract base classes
-
-## Configuration Examples
-
-### Minimal Setup
 ```json
 {
   "enabled": true,
-  "model": "anthropic/claude-sonnet-4.5"
+  "model": "z-ai/glm-4.5-air"
 }
 ```
 
-### Full Setup
+### Full
+
 ```json
 {
   "enabled": true,
-  "ai_provider": "openrouter",
-  "model": "anthropic/claude-sonnet-4.5",
-  "max_tokens": 4000,
+  "model": "z-ai/glm-4.5-air",
+  "max_tokens": null,
   "temperature": 0.3,
   "exclusions": {
-    "directories": ["node_modules"],
-    "file_patterns": ["*.lock"]
+    "directories": ["node_modules", "vendor", "build"],
+    "file_patterns": ["*.lock", "*.min.js"],
+    "file_prefixes": ["test_"]
   },
   "cache_settings": {
-    "enabled": true,
+    "cache_location": ".review_cache",
     "ttl_days": 7
+  },
+  "review_settings": {
+    "severity_threshold": "minor",
+    "max_comments_per_file": 10
   }
 }
 ```
 
-## Future Improvements
+## Extending the System
 
-- [ ] Add async/await for parallel file reviews
-- [ ] Implement distributed caching (Redis)
-- [ ] Add more AI providers (Anthropic, OpenAI, Gemini)
-- [ ] Plugin system for custom analyzers
-- [ ] Web dashboard for analytics
-- [ ] GraphQL API for integrations
+### Add a New Platform (e.g., Bitbucket)
 
----
+```python
+# src/adapters/bitbucket_adapter.py
+from .base import PlatformAdapter
 
-**Version**: 2.0.0
-**Last Updated**: 2026-02-06
+class BitbucketAdapter(PlatformAdapter):
+    def get_changes(self, pr_id): ...
+    def post_comments(self, pr_id, comments): ...
+    def post_summary(self, pr_id, stats, comments): ...
+    def post_explainer_summary(self, pr_id, explainer, stats, comments): ...
+    def clear_bot_comments(self, pr_id): ...
+```
+
+### Add a New AI Provider
+
+```python
+# src/adapters/claude_provider.py
+from .base import AIProviderAdapter
+
+class ClaudeProvider(AIProviderAdapter):
+    def review(self, context): ...
+    def review_batch(self, batch_context): ...
+    def test_connection(self): ...
+```
+
+### Add a New Language to the Linter
+
+Update `LinterTool.LINTER_COMMANDS` in `src/tools/linter.py`:
+
+```python
+'scala': {
+    'command': ['scalastyle', '--format=json'],
+    'check_installed': 'scalastyle --version'
+}
+```
+
+Then update `LanguageDetector` extension map in `src/analyzers/language_detector.py`.
+
+### Add a New Tool
+
+```python
+# src/tools/my_tool.py
+from .base import Tool, ToolResult
+
+class MyTool(Tool):
+    @property
+    def name(self): return "my_tool"
+
+    def execute(self, **kwargs) -> ToolResult:
+        ...
+        return ToolResult(success=True, data={...})
+```
+
+Register it in `reviewer.py`:
+
+```python
+self.tool_registry.register(MyTool())
+```
+
+## Version Notes
+
+- **v3** (cache key): pre-linter single-file review
+- **v6-linter-first** (cache key): current — linter-first batch pipeline
+- Last architecture update: 2026-07-27

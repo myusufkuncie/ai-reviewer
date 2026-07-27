@@ -142,79 +142,36 @@ class CodeReviewer:
         if self.enable_verification and self.tool_registry and pending_items:
             self._run_batched_linters(pending_items)
 
-        # Batch-review pending files in chunks
+        # Single AI call for all pending files (1M context — no batching needed)
+        explainer_text = ""
         if pending_items:
-            # Token budget for a single batch's input context.
-            # Keep well below the model's 1M limit to leave room for
-            # output tokens and prompt overhead.
-            max_input_tokens = self.config.get('max_input_tokens', 800000)
+            all_pr_filepaths = [i['filepath'] for i in pending_items]
             total = len(pending_items)
-            initial_chunks = self._pack_batches(
-                pending_items, max_input_tokens
-            )
+            filenames = ', '.join(i['filepath'] for i in pending_items)
             print(f"\n{'='*80}")
-            print(
-                f"AI review: {total} file(s) in"
-                f" {len(initial_chunks)} batch(es)"
-                f" (token budget: {max_input_tokens})"
-            )
+            print(f"AI review: {total} file(s) in 1 call: {filenames}")
             print(f"{'='*80}")
 
-            # Process chunks as a queue so oversized chunks can be split
-            # in half and re-queued.
-            queue = list(initial_chunks)
-            processed = 0
-            while queue:
-                chunk = queue.pop(0)
-                batch_context = self.context_builder.build_batch_context(
-                    chunk
-                )
-                # Rough estimate: ~4 chars per token.
-                estimated_tokens = len(batch_context) // 4
+            context = self.context_builder.build_batch_context(
+                pending_items, all_pr_filepaths=all_pr_filepaths
+            )
+            result = self.ai_provider.review_batch(context)
+            comments = result.get('comments', [])
+            explainer_text = result.get('explainer', '')
 
-                if estimated_tokens > max_input_tokens and len(chunk) > 1:
-                    mid = len(chunk) // 2
-                    print(
-                        f"\n⚠ Batch of {len(chunk)} file(s) estimated at"
-                        f" ~{estimated_tokens} tokens exceeds budget"
-                        f" ({max_input_tokens}). Splitting into"
-                        f" {mid} + {len(chunk) - mid}."
-                    )
-                    queue.insert(0, chunk[mid:])
-                    queue.insert(0, chunk[:mid])
-                    continue
+            # Map comments back to files and cache each
+            comments_by_file: Dict[str, list] = {}
+            for c in comments:
+                comments_by_file.setdefault(c.get('filepath', ''), []).append(c)
 
-                if estimated_tokens > max_input_tokens:
-                    print(
-                        f"\n⚠ Single file exceeds token budget"
-                        f" (~{estimated_tokens} tokens):"
-                        f" {chunk[0]['filepath']}. Sending anyway;"
-                        f" API may reject."
-                    )
-
-                processed += 1
-                filenames = ', '.join(item['filepath'] for item in chunk)
-                print(
-                    f"\nBatch {processed} ({len(chunk)} file(s),"
-                    f" ~{estimated_tokens} tokens): {filenames}"
-                )
-
-                comments = self.ai_provider.review_batch(batch_context)
-
-                # Map comments back to their files and cache each
-                comments_by_file: Dict[str, list] = {}
-                for c in (comments or []):
-                    fp = c.get('filepath', '')
-                    comments_by_file.setdefault(fp, []).append(c)
-
-                for item in chunk:
-                    fp = item['filepath']
-                    file_comments = comments_by_file.get(fp, [])
-                    if file_comments:
-                        self.cache.set(item['cache_key'], file_comments)
-                        all_comments.extend(file_comments)
-                        stats['total_comments'] += len(file_comments)
-                    stats['files_reviewed'] += 1
+            for item in pending_items:
+                fp = item['filepath']
+                file_comments = comments_by_file.get(fp, [])
+                if file_comments:
+                    self.cache.set(item['cache_key'], file_comments)
+                    all_comments.extend(file_comments)
+                    stats['total_comments'] += len(file_comments)
+                stats['files_reviewed'] += 1
 
         # Clear previous bot comments before posting new ones
         print(f"\n{'='*80}")
@@ -222,7 +179,7 @@ class CodeReviewer:
         print(f"{'='*80}")
         self.platform.clear_bot_comments(pr_id)
 
-        # Post comments to platform
+        # Post inline comments
         print(f"\n{'='*80}")
         print("Posting review comments...")
         print(f"{'='*80}")
@@ -231,8 +188,11 @@ class CodeReviewer:
         else:
             print("⊘ No comments to post")
 
-        # Post summary
-        self.platform.post_summary(pr_id, stats, all_comments)
+        # Post Explainer + Understanding Quiz (or plain stats summary)
+        if explainer_text:
+            self.platform.post_explainer_summary(pr_id, explainer_text, stats, all_comments)
+        else:
+            self.platform.post_summary(pr_id, stats, all_comments)
 
         print(f"\n{'='*80}")
         print("Review complete!")

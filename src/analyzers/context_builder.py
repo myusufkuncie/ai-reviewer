@@ -1,6 +1,7 @@
 """Build comprehensive context for AI review"""
 
 import re
+import ast
 import json
 from typing import Dict, List, Optional
 from pathlib import Path
@@ -143,6 +144,114 @@ class ContextBuilder:
                 result['classes'].append(match.group(1))
 
         return result
+
+    def extract_changed_symbols(
+        self, file_content: str, changed_lines: List[int], filepath: str
+    ) -> List[str]:
+        """Extract complete function/class bodies that contain changed lines.
+
+        Returns full source of each relevant symbol (no truncation).
+        Falls back to first 150 lines if parsing fails.
+        """
+        if not file_content or not changed_lines:
+            return []
+
+        changed_set = set(changed_lines)
+
+        if filepath.endswith('.py'):
+            try:
+                tree = ast.parse(file_content)
+                symbols = []
+                for node in ast.walk(tree):
+                    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                        continue
+                    if not hasattr(node, 'end_lineno'):
+                        continue
+                    if any(node.lineno <= ln <= node.end_lineno for ln in changed_set):
+                        segment = ast.get_source_segment(file_content, node)
+                        if segment:
+                            symbols.append(segment)
+                return symbols if symbols else []
+            except SyntaxError:
+                pass
+
+        if filepath.endswith(('.js', '.ts', '.jsx', '.tsx')):
+            lines = file_content.split('\n')
+            symbols = []
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                # Match function/class declarations
+                if re.match(
+                    r'^\s*(export\s+)?(default\s+)?(async\s+)?'
+                    r'(function|class)\s+\w+|'
+                    r'^\s*(const|let|var)\s+\w+\s*=\s*(async\s*)?\(',
+                    line
+                ):
+                    start = i + 1  # 1-based
+                    # Find the end by counting braces
+                    depth = 0
+                    end = i
+                    for j in range(i, min(i + 300, len(lines))):
+                        depth += lines[j].count('{') - lines[j].count('}')
+                        if depth > 0 or (j == i and depth == 0):
+                            end = j + 1
+                        if depth <= 0 and j > i:
+                            end = j + 1
+                            break
+                    end_line = end  # 1-based
+                    if any(start <= ln <= end_line for ln in changed_set):
+                        symbols.append('\n'.join(lines[i:end]))
+                i += 1
+            return symbols
+
+        return []
+
+    def find_callers_in_pr(
+        self, filepath: str, all_pr_filepaths: List[str], head_sha: str
+    ) -> List[Dict]:
+        """Find files in the same PR that import/call the changed file.
+
+        No extra API cost — these files are already fetched as part of the PR.
+        """
+        module_name = Path(filepath).stem
+        callers = []
+
+        for other_path in all_pr_filepaths:
+            if other_path == filepath:
+                continue
+
+            content = self.platform.get_file_content(other_path, head_sha)
+            if not content:
+                continue
+
+            is_caller = False
+            if filepath.endswith('.py') and other_path.endswith('.py'):
+                is_caller = bool(
+                    re.search(
+                        rf'(from\s+[\.\w]*{re.escape(module_name)}\s+import'
+                        rf'|import\s+[\.\w]*{re.escape(module_name)})',
+                        content
+                    )
+                )
+            elif filepath.endswith(('.js', '.ts', '.jsx', '.tsx')):
+                is_caller = bool(
+                    re.search(
+                        rf'''(from\s+['"][^'"]*{re.escape(module_name)}['"]'''
+                        rf'''|require\s*\(\s*['"][^'"]*{re.escape(module_name)}['"]\s*\))''',
+                        content
+                    )
+                )
+
+            if is_caller:
+                callers.append({
+                    'path': other_path,
+                    'content': content,
+                    'reason': 'caller_in_pr',
+                    'relevance': 'high'
+                })
+
+        return callers
 
     def get_related_files_smart(self, filepath: str, base_sha: str, head_sha: str) -> List[Dict]:
         """Intelligently find related files based on imports and usage."""
@@ -653,21 +762,25 @@ Return empty array [] if code looks good. Be specific and constructive."""
 
         return context
 
-    def build_batch_context(self, file_items: List[Dict]) -> str:
+    def build_batch_context(self, file_items: List[Dict], all_pr_filepaths: List[str] = None) -> str:
         """Build a single review context for multiple files (batch mode).
 
         Args:
             file_items: List of dicts, each with keys:
                 - filepath: str
                 - diff: str
-                - change: dict (with base_sha, head_sha)
+                - change: dict (with base_sha, head_sha, pr_title, pr_description)
                 - linter_results: dict or None
+                - changed_lines: List[int] (line numbers touched by the diff)
+            all_pr_filepaths: All filepaths changed in this PR (for caller detection)
 
         Returns:
             Formatted context string covering all files for a single AI call
         """
         if not file_items:
             return ""
+
+        all_pr_filepaths = all_pr_filepaths or []
 
         # Use first item's SHAs for shared project context
         first_change = file_items[0]['change']
@@ -678,8 +791,17 @@ Return empty array [] if code looks good. Be specific and constructive."""
         docker_info = self.get_dockerfile_content(head_sha)
         architecture = self.get_project_architecture(head_sha)
 
+        # PR metadata (same for all files in the PR)
+        pr_title = first_change.get('pr_title', '')
+        pr_description = first_change.get('pr_description', '')
+
         context = "# BATCH CODE REVIEW\n\n"
         context += f"Reviewing {len(file_items)} file(s) in this batch.\n\n"
+
+        if pr_title:
+            context += f"## Pull Request: {pr_title}\n\n"
+        if pr_description:
+            context += f"**PR Description**:\n{pr_description[:2000]}\n\n"
 
         # Shared README
         if readme:
@@ -713,6 +835,7 @@ Return empty array [] if code looks good. Be specific and constructive."""
             diff = item['diff']
             change = item['change']
             linter_results = item.get('linter_results')
+            changed_lines = item.get('changed_lines', [])
 
             base_sha = change.get('base_sha')
             head_sha = change.get('head_sha')
@@ -735,18 +858,53 @@ Return empty array [] if code looks good. Be specific and constructive."""
                 context += "**Imports**: "
                 context += ", ".join(file_info_after['imports'][:5]) + "\n\n"
 
-            if file_before:
-                context += f"### Before (truncated)\n```\n{file_before[:1500]}"
-                context += "\n...[truncated]\n" if len(file_before) > 1500 else "\n"
-                context += "```\n\n"
+            # Before: show changed symbols extracted from BEFORE version
+            if file_before and changed_lines:
+                symbols_before = self.extract_changed_symbols(file_before, changed_lines, filepath)
+                if symbols_before:
+                    context += "### Changed Symbols — BEFORE\n"
+                    for sym in symbols_before:
+                        context += f"```\n{sym}\n```\n"
+                    context += "\n"
+                else:
+                    context += "### Before (first 150 lines)\n```\n"
+                    lines_before = file_before.split('\n')[:150]
+                    context += '\n'.join(lines_before)
+                    if len(file_before.split('\n')) > 150:
+                        context += "\n...[truncated]..."
+                    context += "\n```\n\n"
+            elif file_before:
+                context += "### Before (first 150 lines)\n```\n"
+                lines_before = file_before.split('\n')[:150]
+                context += '\n'.join(lines_before)
+                if len(file_before.split('\n')) > 150:
+                    context += "\n...[truncated]..."
+                context += "\n```\n\n"
 
+            # After: show changed symbols from AFTER version with line numbers
             if file_after:
+                symbols_after = self.extract_changed_symbols(file_after, changed_lines, filepath) if changed_lines else []
+                if symbols_after:
+                    context += "### Changed Symbols — AFTER (with line numbers)\n"
+                    context += "**IMPORTANT**: Use the line numbers from the full file listing below for inline comments.\n"
+                    for sym in symbols_after:
+                        context += f"```\n{sym}\n```\n"
+                    context += "\n"
+
+                # Always include full file with line numbers for accurate line references
                 lines_with_numbers = []
-                for i, line in enumerate(file_after.split('\n')[:100], 1):
+                for i, line in enumerate(file_after.split('\n'), 1):
                     lines_with_numbers.append(f"{i:4d} | {line}")
                 numbered = '\n'.join(lines_with_numbers)
-                truncate_msg = '...[truncated after line 100]...' if len(file_after.split('\n')) > 100 else ''
-                context += f"### After (with line numbers)\n```\n{numbered}\n{truncate_msg}\n```\n\n"
+                context += f"### Full File AFTER (with line numbers)\n```\n{numbered}\n```\n\n"
+
+            # Callers found in the same PR
+            if all_pr_filepaths:
+                callers = self.find_callers_in_pr(filepath, all_pr_filepaths, head_sha)
+                if callers:
+                    context += f"### Callers in this PR ({len(callers)} file(s) that import this file)\n\n"
+                    for caller in callers:
+                        context += f"**{caller['path']}**\n```\n{caller['content']}\n```\n\n"
 
             if linter_results and linter_results.get('filtered_issues', 0) > 0:
                 context += f"### Linter Results ({linter_results['filtered_issues']} issues)\n"
@@ -761,18 +919,54 @@ Return empty array [] if code looks good. Be specific and constructive."""
 
         context += """## Review Instructions
 
-Review ALL files listed above. For each issue found, include the correct `filepath`.
+You are an expert code reviewer. Do two things in a single response:
 
-Return a single flat JSON array for all files combined:
-[
-  {
-    "filepath": "<exact filepath from FILE N header>",
-    "line": <line_number from the After section>,
-    "comment": "<detailed comment>",
-    "severity": "critical|major|minor|suggestion"
-  }
-]
+**PART 1 — Inline Comments (JSON)**
+Find all bugs, security issues, performance problems, and style issues.
 
-Return empty array [] if all code looks good. Be specific and constructive."""
+**PART 2 — PR Explainer + Understanding Quiz (Markdown)**
+Write a structured PR explainer with this exact format:
+
+### 1. Explainer
+
+**Background**
+Briefly explain the existing system/code this PR touches. What was already there? What concepts does a reader need before looking at the diff?
+
+**Goal & Intuition**
+In plain language, what is this PR trying to achieve? Explain the core idea before showing any code.
+
+**Literate Walkthrough**
+Walk through the important changes in logical order (not file order). For each major change:
+- Explain *why* it was done this way
+- Show a small relevant code snippet
+- Point out key decisions, trade-offs, or gotchas
+
+### 2. Review Comments
+Summarize the most important issues you found. If none, say so clearly.
+
+### 3. Understanding Quiz
+Write 4-6 short questions the author/reviewer must answer before merging.
+Test real understanding, not trivia:
+- Why was approach X chosen over Y?
+- What happens in edge case Z?
+- Which invariant does this change preserve or risk breaking?
+- Where exactly does the new state transition happen?
+
+---
+
+Return a single JSON object with this structure:
+{
+  "comments": [
+    {
+      "filepath": "<exact filepath from FILE N header>",
+      "line": <line_number from the Full File AFTER section>,
+      "comment": "<detailed comment>",
+      "severity": "critical|major|minor|suggestion"
+    }
+  ],
+  "explainer": "<the full Explainer + Quiz markdown as a single escaped string>"
+}
+
+Use empty array for "comments" if code looks good. Always include "explainer"."""
 
         return context

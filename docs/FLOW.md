@@ -1,740 +1,151 @@
-# AI Code Reviewer - System Flow and Architecture
+# System Flow
 
 ## High-Level Architecture
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                        Developer Workflow                            │
-└──────────────────────────────────────────────────────────────────────┘
-                                    │
-                    ┌───────────────┴───────────────┐
-                    │                               │
-                    ▼                               ▼
-        ┌───────────────────────┐       ┌───────────────────────┐
-        │   GitHub PR Created   │       │  GitLab MR Created    │
-        └───────────┬───────────┘       └───────────┬───────────┘
-                    │                               │
-                    │ Webhook/CI Trigger            │
-                    │                               │
-                    ▼                               ▼
-        ┌───────────────────────┐       ┌───────────────────────┐
-        │  GitHub Actions Run   │       │   GitLab CI Run       │
-        └───────────┬───────────┘       └───────────┬───────────┘
-                    │                               │
-                    └───────────────┬───────────────┘
-                                    │
-                                    ▼
-                    ┌───────────────────────────┐
-                    │   AI Reviewer Container   │
-                    │      (Docker/Python)      │
-                    └───────────┬───────────────┘
-                                │
-                ┌───────────────┼───────────────┐
-                │               │               │
-                ▼               ▼               ▼
-    ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-    │ Config Load  │  │  Diff Fetch  │  │ Context Build│
-    └──────┬───────┘  └──────┬───────┘  └──────┬───────┘
-           │                 │                  │
-           └────────┬────────┴────────┬─────────┘
-                    │                 │
-                    ▼                 ▼
-            ┌──────────────┐  ┌──────────────┐
-            │  Cache Check │  │ AI Provider  │
-            └──────┬───────┘  └──────┬───────┘
-                   │                 │
-                   └────────┬────────┘
-                            │
-                            ▼
-                ┌───────────────────────┐
-                │   Review Processing   │
-                └───────────┬───────────┘
-                            │
-                ┌───────────┴───────────┐
-                │                       │
-                ▼                       ▼
-    ┌───────────────────┐   ┌───────────────────┐
-    │  GitHub Comments  │   │  GitLab Comments  │
-    └───────────────────┘   └───────────────────┘
+```mermaid
+flowchart LR
+    dev[Developer] -->|push| pr[PR / MR]
+    pr -->|webhook / CI trigger| ci[GitHub Actions\nor GitLab CI]
+    ci --> reviewer[AI Reviewer\nPython container]
+    reviewer --> platform[Platform Adapter\nGitHub / GitLab]
+    reviewer --> openrouter[OpenRouter API\nLLM]
+    reviewer --> linter[Local Linters\npylint · eslint · dart · golangci-lint …]
+    platform -->|inline comments + explainer| pr
 ```
 
-## Detailed Component Flow
+## End-to-End Review Flow
 
-### 1. Platform Detection and Initialization
+```mermaid
+flowchart TD
+    A[Start: PR/MR ID] --> B[Load .ai-review-config.json]
+    B --> C[platform.get_changes]
+    C --> D{For each changed file}
 
-```
-┌─────────────────────────────────────────────────────┐
-│              Application Entry Point                 │
-│                   (main.py)                         │
-└────────────────────┬────────────────────────────────┘
-                     │
-                     ▼
-        ┌────────────────────────┐
-        │ Environment Variables  │
-        │    Detection           │
-        └────────┬───────────────┘
-                 │
-     ┌───────────┴───────────┐
-     │                       │
-     ▼                       ▼
-┌────────────┐        ┌────────────┐
-│  GitHub?   │        │  GitLab?   │
-│ GITHUB_*   │        │   CI_*     │
-└─────┬──────┘        └─────┬──────┘
-      │                     │
-      ▼                     ▼
-┌────────────┐        ┌────────────┐
-│  GitHub    │        │  GitLab    │
-│  Adapter   │        │  Adapter   │
-└────────────┘        └────────────┘
-```
+    D -->|excluded / binary / too large| SKIP[Skip file]
+    D -->|cache hit v6-linter-first| CACHED[Use cached comments]
+    D -->|needs review| PENDING[Add to pending_items]
 
-**Environment Variables:**
+    PENDING --> LINT[Pass 1 — _run_batched_linters\none subprocess per language group\nresults attached to each item]
 
-GitHub:
-- `GITHUB_TOKEN`
-- `GITHUB_REPOSITORY`
-- `GITHUB_EVENT_PATH`
-- `GITHUB_SHA`
+    LINT --> CTX[build_batch_context\none prompt for ALL pending files\nincludes linter results inline]
+    CTX --> AI[review_batch — single OpenRouter call\nreturns comments + explainer text]
 
-GitLab:
-- `GITLAB_TOKEN`
-- `CI_SERVER_URL`
-- `CI_PROJECT_ID`
-- `CI_MERGE_REQUEST_IID`
+    AI --> MAP[Map comments back to files\nCache each file individually]
+    CACHED --> MERGE[Merge all comments]
+    MAP --> MERGE
 
-### 2. Configuration Loading Flow
+    MERGE --> VER{enable_verification?}
+    VER -->|yes| VERIFIER[DoubleCheckVerifier\ncritical + major only\nlinter line-match · git history · related files]
+    VER -->|no| CLEAR
+    VERIFIER --> CLEAR[platform.clear_bot_comments]
 
-```
-┌─────────────────────────────────────────────────────┐
-│              Configuration Loader                    │
-└────────────────────┬────────────────────────────────┘
-                     │
-                     ▼
-        ┌────────────────────────┐
-        │ Check for             │
-        │ .ai-review-config.json│
-        └────────┬───────────────┘
-                 │
-     ┌───────────┴───────────┐
-     │                       │
-     ▼                       ▼
-┌────────────┐        ┌────────────┐
-│   Found    │        │ Not Found  │
-└─────┬──────┘        └─────┬──────┘
-      │                     │
-      ▼                     ▼
-┌────────────┐        ┌────────────┐
-│ Load JSON  │        │  Use       │
-│ Parse      │        │  Defaults  │
-└─────┬──────┘        └─────┬──────┘
-      │                     │
-      └──────────┬──────────┘
-                 │
-                 ▼
-        ┌────────────────────┐
-        │ Merge with Defaults│
-        │ Validate Schema    │
-        └────────┬───────────┘
-                 │
-                 ▼
-        ┌────────────────────┐
-        │ Configuration      │
-        │ Object Ready       │
-        └────────────────────┘
+    CLEAR --> POST[platform.post_comments\ninline on each diff line]
+    POST --> EXPLAIN{explainer text returned?}
+    EXPLAIN -->|yes| EXP[post_explainer_summary\nExplainer + Understanding Quiz]
+    EXPLAIN -->|no| SUM[post_summary\nStats only]
 ```
 
-### 3. File Change Detection and Filtering
+## Pass 1 — Linter Batching
 
-```
-┌─────────────────────────────────────────────────────┐
-│            Fetch PR/MR Changes                       │
-└────────────────────┬────────────────────────────────┘
-                     │
-                     ▼
-        ┌────────────────────────┐
-        │  Get Diff from API     │
-        │  (base...head)         │
-        └────────┬───────────────┘
-                 │
-                 ▼
-        ┌────────────────────────┐
-        │  Parse Changed Files   │
-        └────────┬───────────────┘
-                 │
-                 ▼
-        ┌────────────────────────┐
-        │   For Each File        │
-        └────────┬───────────────┘
-                 │
-                 ▼
-        ┌────────────────────────┐
-        │  Apply Exclusion Rules │
-        └────────┬───────────────┘
-                 │
-     ┌───────────┴───────────┐
-     │                       │
-     ▼                       ▼
-┌────────────┐        ┌────────────┐
-│  Excluded  │        │  Include   │
-│  (Skip)    │        │  (Review)  │
-└────────────┘        └─────┬──────┘
-                            │
-                            ▼
-                   ┌────────────────┐
-                   │ Detect Language│
-                   └────────┬───────┘
-                            │
-                            ▼
-                   ┌────────────────┐
-                   │  Build Context │
-                   └────────────────┘
-
-**Exclusion Rules:**
-1. Check directory exclusions
-2. Check file pattern exclusions
-3. Check file prefix exclusions
-4. Check binary files
-5. Check file size limits
+```mermaid
+flowchart LR
+    items[pending_items] --> group{Group by language}
+    group -->|python files| pylint[pylint --output-format=json]
+    group -->|js/ts files| eslint[eslint --format=json]
+    group -->|dart files| dart[dart analyze --format=json]
+    group -->|go files| golangci[golangci-lint --out-format=json]
+    group -->|rust files| clippy[cargo clippy --message-format=json]
+    pylint --> filter[Filter issues to changed lines only]
+    eslint --> filter
+    dart --> filter
+    golangci --> filter
+    clippy --> filter
+    filter --> attach[Attach linter_results to each item]
 ```
 
-### 4. Context Building Flow
+One subprocess per language — not one per file. If a linter is not installed, that language group is skipped gracefully.
 
-```
-┌─────────────────────────────────────────────────────┐
-│              Context Builder                         │
-│           (for each file to review)                  │
-└────────────────────┬────────────────────────────────┘
-                     │
-         ┌───────────┴───────────┬──────────────┐
-         │                       │              │
-         ▼                       ▼              ▼
-┌──────────────────┐   ┌──────────────┐  ┌──────────────┐
-│  Fetch File      │   │ Fetch File   │  │  Parse Diff  │
-│  Before (base)   │   │ After (head) │  │   Changes    │
-└────────┬─────────┘   └──────┬───────┘  └──────┬───────┘
-         │                    │                  │
-         └────────────┬───────┴──────────────────┘
-                      │
-                      ▼
-         ┌─────────────────────────┐
-         │  Extract Metadata       │
-         │  - Imports              │
-         │  - Functions            │
-         │  - Classes              │
-         │  - Constants            │
-         └────────┬────────────────┘
-                  │
-    ┌─────────────┼─────────────┬─────────────┐
-    │             │             │             │
-    ▼             ▼             ▼             ▼
-┌────────┐  ┌─────────┐  ┌─────────┐  ┌──────────┐
-│ README │  │ Related │  │ Docker  │  │  Tests   │
-│ Files  │  │ Files   │  │ Config  │  │  Files   │
-└───┬────┘  └────┬────┘  └────┬────┘  └────┬─────┘
-    │            │            │            │
-    └────────────┴────────────┴────────────┘
-                  │
-                  ▼
-         ┌─────────────────────┐
-         │  Analyze Impact     │
-         │  - Scope            │
-         │  - Risk Areas       │
-         │  - Breaking Changes │
-         └────────┬────────────┘
-                  │
-                  ▼
-         ┌─────────────────────┐
-         │  Build Prompt       │
-         │  (Context String)   │
-         └─────────────────────┘
+## Pass 2 — Batch AI Review
+
+All pending files are sent in a single API call. The response is a JSON object:
+
+```json
+{
+  "comments": [
+    {
+      "filepath": "src/auth.py",
+      "line": 42,
+      "severity": "critical",
+      "message": "SQL query is not parameterised",
+      "suggestion": "Use db.execute(query, params) instead"
+    }
+  ],
+  "explainer": "## What changed in this PR\n..."
+}
 ```
 
-### 5. AI Review Processing Flow
+Comments are mapped back to individual files. Each file's comments are cached separately so partial cache hits work on the next run.
 
-```
-┌─────────────────────────────────────────────────────┐
-│              Review Processor                        │
-└────────────────────┬────────────────────────────────┘
-                     │
-                     ▼
-        ┌────────────────────────┐
-        │  Generate Cache Key    │
-        │  (hash of diff)        │
-        └────────┬───────────────┘
-                 │
-                 ▼
-        ┌────────────────────────┐
-        │   Check Cache          │
-        └────────┬───────────────┘
-                 │
-     ┌───────────┴───────────┐
-     │                       │
-     ▼                       ▼
-┌────────────┐        ┌────────────┐
-│Cache Hit   │        │ Cache Miss │
-│(Return)    │        │            │
-└────────────┘        └─────┬──────┘
-                            │
-                            ▼
-                   ┌────────────────┐
-                   │ Select AI      │
-                   │ Provider       │
-                   └────────┬───────┘
-                            │
-        ┌───────────────────┼──────────────────┐
-        │                   │                  │
-        ▼                   ▼                  ▼
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│  OpenRouter  │  │ Claude API   │  │  OpenAI API  │
-└──────┬───────┘  └──────┬───────┘  └──────┬───────┘
-       │                 │                  │
-       └─────────────────┴──────────────────┘
-                         │
-                         ▼
-                ┌────────────────┐
-                │  Call AI API   │
-                │  (with prompt) │
-                └────────┬───────┘
-                         │
-                         ▼
-                ┌────────────────┐
-                │  Parse Response│
-                │  Extract JSON  │
-                └────────┬───────┘
-                         │
-                         ▼
-                ┌────────────────┐
-                │  Validate      │
-                │  Comments      │
-                └────────┬───────┘
-                         │
-                         ▼
-                ┌────────────────┐
-                │  Save to Cache │
-                └────────┬───────┘
-                         │
-                         ▼
-                ┌────────────────┐
-                │ Return Comments│
-                └────────────────┘
+## Verification Flow
+
+```mermaid
+flowchart TD
+    issues[All AI comments] --> split{Severity}
+    split -->|minor / suggestion| passthru[Pass through unchanged]
+    split -->|critical / major| verify[DoubleCheckVerifier]
+
+    verify --> lcheck{Linter flagged\nsame line?}
+    lcheck -->|yes| confirmed[linter_confirmed: true\nlinter_evidence attached]
+    lcheck -->|no| kept[linter_confirmed: false\nstill included]
+
+    confirmed --> final[Final issue list]
+    kept --> final
+    passthru --> final
 ```
 
-### 6. Comment Posting Flow
-
-```
-┌─────────────────────────────────────────────────────┐
-│              Comment Poster                          │
-└────────────────────┬────────────────────────────────┘
-                     │
-                     ▼
-        ┌────────────────────────┐
-        │  Aggregate All         │
-        │  Review Comments       │
-        └────────┬───────────────┘
-                 │
-                 ▼
-        ┌────────────────────────┐
-        │  Sort by Severity      │
-        │  and Line Number       │
-        └────────┬───────────────┘
-                 │
-                 ▼
-        ┌────────────────────────┐
-        │  Apply Filters         │
-        │  (max per file, etc)   │
-        └────────┬───────────────┘
-                 │
-                 ▼
-        ┌────────────────────────┐
-        │  Format Comments       │
-        │  (add emoji, style)    │
-        └────────┬───────────────┘
-                 │
-     ┌───────────┴───────────┐
-     │                       │
-     ▼                       ▼
-┌────────────┐        ┌────────────┐
-│  GitHub    │        │  GitLab    │
-│  Adapter   │        │  Adapter   │
-└─────┬──────┘        └─────┬──────┘
-      │                     │
-      ▼                     ▼
-┌────────────┐        ┌────────────┐
-│ Post Inline│        │ Create     │
-│ Comments   │        │ Discussion │
-└─────┬──────┘        └─────┬──────┘
-      │                     │
-      └──────────┬──────────┘
-                 │
-                 ▼
-        ┌────────────────────┐
-        │  Generate Summary  │
-        └────────┬───────────┘
-                 │
-                 ▼
-        ┌────────────────────┐
-        │  Post Summary      │
-        │  Comment           │
-        └────────┬───────────┘
-                 │
-                 ▼
-        ┌────────────────────┐
-        │  Update Status     │
-        │  (if configured)   │
-        └────────────────────┘
-```
-
-## Language-Specific Flow
-
-```
-┌─────────────────────────────────────────────────────┐
-│              Language Detector                       │
-└────────────────────┬────────────────────────────────┘
-                     │
-                     ▼
-        ┌────────────────────────┐
-        │  Check File Extension  │
-        └────────┬───────────────┘
-                 │
-    ┌────────────┼────────────┬────────────┐
-    │            │            │            │
-    ▼            ▼            ▼            ▼
-┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐
-│ .py    │  │ .dart  │  │  .go   │  │  .js   │
-│ Python │  │Flutter │  │Golang  │  │  JS/TS │
-└───┬────┘  └───┬────┘  └───┬────┘  └───┬────┘
-    │           │           │           │
-    ▼           ▼           ▼           ▼
-┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐
-│ Python │  │ Dart   │  │   Go   │  │   JS   │
-│Analyzer│  │Analyzer│  │Analyzer│  │Analyzer│
-└───┬────┘  └───┬────┘  └───┬────┘  └───┬────┘
-    │           │           │           │
-    │           │           │           │
-    └───────────┴───────────┴───────────┘
-                 │
-                 ▼
-        ┌────────────────────┐
-        │ Language-Specific  │
-        │ Review Rules       │
-        └────────┬───────────┘
-                 │
-                 ▼
-        ┌────────────────────┐
-        │ Generate Prompt    │
-        │ with Language      │
-        │ Context            │
-        └────────────────────┘
-```
-
-### Python/Django Review Flow
-```
-File detected: .py
-    ↓
-Check for Django imports
-    ↓
-Load Django-specific rules:
-    - Check Models for migrations
-    - Validate serializers
-    - Check view permissions
-    - SQL injection in raw queries
-    - XSS in templates
-    - CSRF protection
-    ↓
-Add Django context to prompt
-    ↓
-Review with Django expertise
-```
-
-### Flutter/Dart Review Flow
-```
-File detected: .dart
-    ↓
-Check pubspec.yaml
-    ↓
-Load Flutter-specific rules:
-    - Widget best practices
-    - State management patterns
-    - Build method optimization
-    - Memory leak (dispose)
-    - Platform-specific code
-    - Accessibility
-    ↓
-Add Flutter context to prompt
-    ↓
-Review with Flutter expertise
-```
-
-### Go Review Flow
-```
-File detected: .go
-    ↓
-Check go.mod
-    ↓
-Load Go-specific rules:
-    - Error handling patterns
-    - Goroutine safety
-    - Context usage
-    - Interface design
-    - Defer placement
-    - Race conditions
-    ↓
-Add Go context to prompt
-    ↓
-Review with Go expertise
-```
-
-## Error Handling Flow
-
-```
-┌─────────────────────────────────────────────────────┐
-│              Error Occurs                            │
-└────────────────────┬────────────────────────────────┘
-                     │
-                     ▼
-        ┌────────────────────────┐
-        │  Classify Error Type   │
-        └────────┬───────────────┘
-                 │
-    ┌────────────┼────────────┬────────────┐
-    │            │            │            │
-    ▼            ▼            ▼            ▼
-┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
-│  API    │ │ Network │ │  Auth   │ │  Parse  │
-│  Error  │ │ Timeout │ │  Error  │ │  Error  │
-└────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘
-     │           │           │           │
-     ▼           ▼           ▼           ▼
-┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
-│ Retry   │ │ Retry   │ │  Fail   │ │  Skip   │
-│ 3x      │ │ 2x      │ │  Fast   │ │  File   │
-└────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘
-     │           │           │           │
-     └───────────┴───────────┴───────────┘
-                 │
-                 ▼
-        ┌────────────────────┐
-        │  Log Error         │
-        │  (with context)    │
-        └────────┬───────────┘
-                 │
-                 ▼
-        ┌────────────────────┐
-        │  Continue or Exit  │
-        │  (based on severity)│
-        └────────┬───────────┘
-                 │
-     ┌───────────┴───────────┐
-     │                       │
-     ▼                       ▼
-┌────────────┐        ┌────────────┐
-│ Continue   │        │  Exit with │
-│ Review     │        │  Error Msg │
-└────────────┘        └────────────┘
-```
+Verification never removes issues — it enriches them with `linter_confirmed` metadata so reviewers know which findings have static-analysis backing.
 
 ## Caching Strategy
 
-```
-┌─────────────────────────────────────────────────────┐
-│              Cache System                            │
-└────────────────────┬────────────────────────────────┘
-                     │
-        ┌────────────┴────────────┐
-        │                         │
-        ▼                         ▼
-┌──────────────┐          ┌──────────────┐
-│ Local Cache  │          │ Remote Cache │
-│ (File-based) │          │ (Optional)   │
-└──────┬───────┘          └──────┬───────┘
-       │                         │
-       ▼                         ▼
-Cache Key Generation:
-    hash(filename + diff + version)
-       │
-       ▼
-┌────────────────────────┐
-│  Cache Entry           │
-│  {                     │
-│    "key": "abc123",    │
-│    "comments": [...],  │
-│    "timestamp": ...,   │
-│    "version": "v3"     │
-│  }                     │
-└────────────────────────┘
+Cache key: `MD5(filepath + diff + version_string)`
 
-Cache Invalidation:
-- File content changed
-- Config changed
-- Version changed
-- TTL expired (7 days)
+- Version `v6-linter-first` — current pipeline (linter + batch AI)
+- Version `v3` — legacy (no linter, per-file AI)
+
+A cache miss on one file does not invalidate others. Stale entries expire after `ttl_days` (default 7).
+
+## Configuration Loading
+
+```mermaid
+flowchart LR
+    start[ConfigLoader] --> check{.ai-review-config.json\nexists?}
+    check -->|yes| load[Load JSON]
+    check -->|no| defaults[Use defaults]
+    load --> merge[Deep merge with defaults]
+    defaults --> merge
+    merge --> ready[Config ready]
 ```
 
-## Performance Optimization Flow
+## File Filtering
 
-```
-Optimization Strategy:
+Applied before any linting or AI call:
 
-1. Parallel Processing
-   ┌──────────┐  ┌──────────┐  ┌──────────┐
-   │  File 1  │  │  File 2  │  │  File 3  │
-   │  Review  │  │  Review  │  │  Review  │
-   └────┬─────┘  └────┬─────┘  └────┬─────┘
-        └────────────┬─────────────┘
-                     │
-              (Run in parallel)
+1. Hardcoded: skip `.ai-review-config*.json` itself
+2. Config `exclusions.directories` — path contains excluded dir
+3. Config `exclusions.file_prefixes` — filename starts with prefix
+4. Config `exclusions.file_patterns` — glob match on filename or path
+5. Binary flag from platform diff API
+6. Diff length > 10 000 chars
 
-2. Context Truncation
-   - README: max 3000 chars
-   - Related files: max 2000 chars each
-   - Full file: max 2000 chars
-   - Total context: ~ 15-20K tokens
+## Comment Posting
 
-3. Smart File Selection
-   - Related files: max 5
-   - Same directory: max 10 files scanned
-   - Test files: max 2
-
-4. Request Batching
-   - Group similar files
-   - Batch comments posting
-   - Reduce API calls
+```mermaid
+flowchart TD
+    comments[All comments] --> clear[clear_bot_comments\nremove previous bot round]
+    clear --> inline[post_comments\none inline comment per finding]
+    inline --> summary{explainer?}
+    summary -->|yes| exp[post_explainer_summary\nmarkdown block: what changed + quiz]
+    summary -->|no| stats[post_summary\nfiles reviewed · comments · cache hits]
 ```
 
-## Security Flow
-
-```
-┌─────────────────────────────────────────────────────┐
-│              Security Checks                         │
-└────────────────────┬────────────────────────────────┘
-                     │
-        ┌────────────┴────────────┐
-        │                         │
-        ▼                         ▼
-┌──────────────┐          ┌──────────────┐
-│ Credentials  │          │ Code Content │
-│ Handling     │          │ Sanitization │
-└──────┬───────┘          └──────┬───────┘
-       │                         │
-       ▼                         ▼
-┌────────────────┐      ┌────────────────┐
-│ - Env vars only│      │ - Remove secrets│
-│ - No logging   │      │ - Truncate logs│
-│ - Secure store │      │ - Audit trail  │
-└────────────────┘      └────────────────┘
-
-Security Patterns Detected:
-    ↓
-┌────────────────────────┐
-│ - SQL Injection        │
-│ - XSS                  │
-│ - Hardcoded secrets    │
-│ - Weak crypto          │
-│ - Path traversal       │
-│ - Command injection    │
-│ - SSRF                 │
-│ - Insecure deserialize │
-└────────────────────────┘
-```
-
-## Summary Statistics Flow
-
-```
-After all files reviewed:
-    ↓
-Aggregate Statistics:
-    ↓
-┌────────────────────────┐
-│ - Total files reviewed │
-│ - Files skipped        │
-│ - Files excluded       │
-│ - Total comments       │
-│ - By severity:         │
-│   • Critical: N        │
-│   • Major: N           │
-│   • Minor: N           │
-│   • Suggestion: N      │
-│ - Review time          │
-│ - Cache hit rate       │
-│ - API calls made       │
-│ - Tokens used          │
-└────────┬───────────────┘
-         │
-         ▼
-Format Summary Comment
-         │
-         ▼
-Post to PR/MR
-```
-
-## Complete End-to-End Flow
-
-```
-1. Developer pushes code
-         ↓
-2. PR/MR created
-         ↓
-3. CI pipeline triggered
-         ↓
-4. AI Reviewer starts
-         ↓
-5. Load configuration
-         ↓
-6. Detect platform (GitHub/GitLab)
-         ↓
-7. Fetch changed files
-         ↓
-8. Filter files (exclusions)
-         ↓
-9. For each file:
-    a. Detect language
-    b. Build context
-    c. Check cache
-    d. Call AI (if needed)
-    e. Parse response
-    f. Validate comments
-         ↓
-10. Aggregate all comments
-         ↓
-11. Post inline comments
-         ↓
-12. Post summary
-         ↓
-13. Update status/checks
-         ↓
-14. Exit with status code
-```
-
-## Retry and Resilience Strategy
-
-```
-API Call Failed
-    ↓
-Check Error Type
-    ↓
-    ├─ 429 (Rate Limit)
-    │   → Wait with exponential backoff
-    │   → Retry up to 5 times
-    │
-    ├─ 500/502/503 (Server Error)
-    │   → Retry up to 3 times
-    │   → 2s, 4s, 8s delays
-    │
-    ├─ 401/403 (Auth Error)
-    │   → Fail fast
-    │   → Log error
-    │   → Exit
-    │
-    └─ Network Timeout
-        → Retry up to 2 times
-        → 5s, 10s delays
-
-All retries failed
-    ↓
-Skip file and continue
-    ↓
-Log detailed error
-    ↓
-Mark in summary as "review failed"
-```
+The explainer is a markdown block posted as a single PR-level comment, separate from inline findings. It includes a short description of what changed and a quiz to help reviewers confirm understanding.

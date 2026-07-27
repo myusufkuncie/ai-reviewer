@@ -1,453 +1,220 @@
-# Product Requirements Document: Universal AI Code Reviewer
+# Product Requirements Document: AI Code Reviewer
 
 ## Overview
 
-**Product Name**: AI Code Reviewer
-**Version**: 2.0
-**Last Updated**: 2026-02-06
-**Status**: Planning
+| Field | Value |
+| --- | --- |
+| Product | AI Code Reviewer |
+| Version | 3.0 (linter-first batch pipeline) |
+| Last Updated | 2026-07-27 |
+| Status | **Implemented — Active** |
 
 ## Executive Summary
 
-AI Code Reviewer is an automated code review tool that integrates with GitHub and GitLab CI/CD pipelines to provide intelligent, context-aware code reviews for multiple programming languages including Flutter/Dart, Django/Python, Go, JavaScript/TypeScript, and more.
+AI Code Reviewer is an automated code review tool that integrates with GitHub Actions and GitLab CI/CD to provide intelligent, context-aware code reviews. It runs a linter pass first, then sends all changed files in a single AI call, and optionally runs a 2-pass verification for high-severity findings.
 
 ## Problem Statement
 
-### Current Challenges
 1. Manual code reviews are time-consuming and resource-intensive
 2. Code quality varies across teams and projects
-3. Best practices and security vulnerabilities are often missed
+3. Security vulnerabilities and best-practice violations are often missed under review pressure
 4. Small teams lack dedicated reviewers
-5. Context switching between different language ecosystems
 
-### Target Users
-- **Primary**: Development teams (2-50 developers)
-- **Secondary**: Solo developers, Open source maintainers
-- **Use Cases**: Pull Requests, Merge Requests, Pre-commit hooks
+**Target users:** Development teams (2–50 developers), solo developers, open-source maintainers.
 
-## Goals and Objectives
-
-### Primary Goals
-1. Provide automated, context-aware code reviews
-2. Support multiple programming languages and frameworks
-3. Easy integration with GitHub Actions and GitLab CI
-4. Customizable review rules per project
-5. Cost-effective using efficient AI models
-
-### Success Metrics
-- 90% of PRs/MRs reviewed within 2 minutes
-- 70% of issues found are actionable
-- 50% reduction in reviewer time
-- Support for 5+ programming languages
-
-## Features and Requirements
+## Implementation Status
 
 ### Core Features
 
-#### 1. Multi-Platform Support
-**Priority**: P0 (Must Have)
+#### Multi-Platform Support — Implemented
 
-- **GitHub Actions Integration**
-  - Automatic PR comment posting
-  - GitHub API authentication
-  - Status checks integration
-  - Review approval workflows
+| Platform | Status |
+| --- | --- |
+| GitHub Actions — PR comments, API auth | Implemented |
+| GitLab CI — MR discussions, API auth | Implemented |
+| GitHub status checks / review approval | Not implemented |
+| Bitbucket | Not planned |
 
-- **GitLab CI Integration** (existing)
-  - Merge Request discussions
-  - GitLab API authentication
-  - Pipeline integration
+#### Multi-Language Support — Implemented
 
-#### 2. Multi-Language Support
-**Priority**: P0 (Must Have)
+All languages below are detected and have linter integration. The AI review also uses language-specific prompt context.
 
-| Language | Framework Support | Status |
-|----------|------------------|---------|
-| Python | Django, Flask, FastAPI | ✅ Implemented |
-| JavaScript/TypeScript | React, Vue, Angular, Next.js | ✅ Implemented |
-| Dart/Flutter | Flutter framework | 🔄 To Add |
-| Go | Standard library, Gin, Echo | 🔄 To Add |
-| Java | Spring, Spring Boot | 🔄 To Add |
-| Rust | Actix, Rocket | 🔄 To Add |
+| Language | Linter | Fallback | Frameworks in Prompt |
+| --- | --- | --- | --- |
+| Python | pylint | flake8 | Django, Flask, FastAPI |
+| JavaScript | eslint | — | React, Vue, Angular, Next.js |
+| TypeScript | eslint | — | React, Next.js |
+| Dart / Flutter | dart analyze | — | Flutter |
+| Go | golangci-lint | go vet | Gin, Echo |
+| Rust | cargo clippy | — | Actix, Rocket |
+| Java | checkstyle | — | Spring |
+| PHP | phpcs | php -l | Laravel |
 
-#### 3. Intelligent Context Analysis
-**Priority**: P0 (Must Have)
+#### Intelligent Context Analysis — Implemented
 
-- Full file context (before/after changes)
-- Related file detection via imports
-- Project architecture understanding
-- README and documentation parsing
-- Docker configuration analysis
-- Dependency analysis
-- Test file correlation
+- Full file context (before/after changes via platform diff API)
+- README content included in batch prompt (up to 3000 chars)
+- Dockerfile/docker-compose content included
+- Related file detection via import parsing
+- Caller detection (files that import changed files)
+- Changed symbol extraction (AST-based, functions/classes)
 
-#### 4. Configurable Review Rules
-**Priority**: P0 (Must Have)
+#### Configurable Review Rules — Implemented
 
-**Configuration File**: `.ai-review-config.json`
+Config file: `.ai-review-config.json` at repo root. All fields are optional — defaults apply if absent.
 
 ```json
 {
   "enabled": true,
-  "ai_provider": "openrouter",
-  "model": "anthropic/claude-sonnet-4.5",
-  "max_tokens": 4000,
+  "model": "z-ai/glm-4.5-air",
+  "max_tokens": null,
   "temperature": 0.3,
-
-  "language_specific": {
-    "flutter": {
-      "check_pubspec": true,
-      "widget_best_practices": true,
-      "state_management": ["bloc", "riverpod", "provider"]
-    },
-    "python": {
-      "check_type_hints": true,
-      "pep8_compliance": true,
-      "django_security": true
-    },
-    "go": {
-      "check_error_handling": true,
-      "goroutine_safety": true,
-      "interface_design": true
-    }
-  },
-
   "exclusions": {
     "directories": ["node_modules", "vendor", "build"],
     "file_patterns": ["*.lock", "*.min.js"],
-    "file_prefixes": ["test_", "_test"]
+    "file_prefixes": ["test_"]
   },
-
+  "cache_settings": {
+    "cache_location": ".review_cache",
+    "ttl_days": 7
+  },
   "review_settings": {
     "severity_threshold": "minor",
-    "auto_approve_minor": false,
-    "require_tests": true,
-    "check_security": true,
-    "check_performance": true
-  },
-
-  "comment_settings": {
-    "style": "detailed",
-    "include_examples": true,
     "max_comments_per_file": 10
   }
 }
 ```
 
-#### 5. Smart Caching
-**Priority**: P1 (Should Have)
+Note: `language_specific` block is parsed by config but not yet wired to specialized linter rules.
 
-- Cache reviews based on diff hash
-- Invalidate on file changes
-- Local and distributed cache support
-- Cache expiration policies
+#### Smart Caching — Implemented
 
-#### 6. Security and Performance Analysis
-**Priority**: P0 (Must Have)
+- MD5 cache key: `hash(filepath + diff + version_string)`
+- File-backed storage with TTL expiration (default 7 days)
+- Per-file granularity — one changed file doesn't bust cache for others
+- Current version string: `v6-linter-first`
 
-- OWASP Top 10 vulnerability detection
-- SQL injection patterns
-- XSS vulnerabilities
-- Authentication/Authorization issues
-- Performance anti-patterns
-- Memory leak detection
-- N+1 query detection
+#### Batch AI Review — Implemented
 
-### Advanced Features
+All pending files (those that missed the cache) are sent in a single OpenRouter API call. The response is a JSON object with `comments` (array of inline findings) and `explainer` (markdown summary + understanding quiz). No per-file loop.
 
-#### 7. AI Provider Flexibility
-**Priority**: P1 (Should Have)
+#### Linter-First Pass — Implemented
 
-Support multiple AI providers:
-- OpenRouter (current)
-- Anthropic Claude API
-- OpenAI GPT-4
-- Google Gemini
-- Self-hosted models (Ollama)
+Before the AI call, language-specific linters run for all files grouped by language (one subprocess per language). Output is filtered to changed lines only and embedded in the batch prompt. This gives the AI static-analysis evidence alongside the diff.
 
-#### 8. Review Modes
-**Priority**: P2 (Nice to Have)
+#### 2-Pass Verification — Implemented
 
-- **Quick Mode**: Fast, surface-level review
-- **Standard Mode**: Balanced depth and speed
-- **Deep Mode**: Comprehensive analysis
-- **Security Focus**: Security-only review
-- **Performance Focus**: Performance-only review
+`DoubleCheckVerifier` runs on `critical` and `major` findings only:
 
-#### 9. Learning and Improvement
-**Priority**: P2 (Nice to Have)
+1. Checks if cached linter output flagged the same line → `linter_confirmed: true/false`
+2. Reads git history of the file (last 3 commits) for context
+3. Reads related files mentioned in the issue text
 
-- Feedback loop for review quality
-- Team-specific pattern learning
-- False positive reduction
-- Custom rule suggestions
+Minor and suggestion findings bypass verification. No findings are removed — verification only adds metadata.
 
-#### 10. Reporting and Analytics
-**Priority**: P2 (Nice to Have)
+#### Explainer + Understanding Quiz — Implemented
 
-- Review statistics dashboard
-- Code quality trends
-- Most common issues
-- Time saved metrics
-- Cost tracking
+A PR-level comment is posted (separate from inline comments) containing:
+
+- Plain-language description of what changed
+- Understanding quiz for reviewers
+
+Only posted when the AI returns an `explainer` field in the batch response.
+
+### AI Provider
+
+| Provider | Status |
+| --- | --- |
+| OpenRouter (any hosted model) | Implemented |
+| Anthropic direct API | Not implemented |
+| OpenAI direct API | Not implemented |
+| Self-hosted / Ollama | Not implemented |
+
+Only OpenRouter is implemented. The `AIProviderAdapter` base class defines the interface for adding others.
+
+### Not Yet Implemented
+
+| Feature | Priority | Notes |
+| --- | --- | --- |
+| GitHub PR status checks | P1 | Adapter interface ready, not wired |
+| Review modes (Quick/Deep/Security-only) | P2 | Would be config-driven prompt variants |
+| Distributed cache (Redis) | P2 | CacheManager interface can be extended |
+| Feedback loop / false-positive learning | P2 | No data collection currently |
+| Analytics dashboard | P3 | No backend |
+| Slack / Discord notifications | P3 | — |
+| VSCode extension | P3 | — |
+| Bitbucket support | Backlog | Needs PlatformAdapter implementation |
 
 ## Technical Architecture
 
-### System Components
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                   Git Platform                          │
-│              (GitHub / GitLab)                          │
-└─────────────────┬───────────────────────────────────────┘
-                  │
-                  │ Webhook / CI Trigger
-                  ▼
-┌─────────────────────────────────────────────────────────┐
-│                CI/CD Pipeline                           │
-│         (GitHub Actions / GitLab CI)                    │
-└─────────────────┬───────────────────────────────────────┘
-                  │
-                  │ Execute ai-reviewer
-                  ▼
-┌─────────────────────────────────────────────────────────┐
-│              AI Reviewer Core                           │
-│  ┌────────────────────────────────────────────────┐    │
-│  │  1. Configuration Loader                       │    │
-│  │  2. Platform Adapter (GitHub/GitLab)           │    │
-│  │  3. Language Detector                          │    │
-│  │  4. Context Builder                            │    │
-│  │  5. AI Provider Adapter                        │    │
-│  │  6. Review Processor                           │    │
-│  │  7. Comment Poster                             │    │
-│  └────────────────────────────────────────────────┘    │
-└─────────────────┬───────────────────────────────────────┘
-                  │
-                  │ API Calls
-                  ▼
-┌─────────────────────────────────────────────────────────┐
-│              AI Provider                                │
-│    (OpenRouter / Claude / GPT-4 / Gemini)              │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    PR[PR / MR] -->|CI trigger| runner[CI Runner]
+    runner --> reviewer[CodeReviewer]
+    reviewer --> platform[PlatformAdapter\nGitHub · GitLab]
+    reviewer --> linter[LinterTool\nbatched per language]
+    reviewer --> context[ContextBuilder\nbuild_batch_context]
+    context --> ai[OpenRouterProvider\nreview_batch — 1 call]
+    ai --> verifier[DoubleCheckVerifier\ncritical + major only]
+    verifier --> platform
+    ai --> platform
 ```
 
-### Data Flow
+Full pipeline: [FLOW.md](FLOW.md) | Module details: [ARCHITECTURE.md](ARCHITECTURE.md)
 
-```
-1. PR/MR Created
-   ↓
-2. CI Triggered
-   ↓
-3. Fetch Changes (diff)
-   ↓
-4. Build Context
-   ├─ Parse Config
-   ├─ Detect Language
-   ├─ Load Related Files
-   ├─ Analyze Architecture
-   └─ Check Cache
-   ↓
-5. Generate Review Prompt
-   ↓
-6. Call AI Provider
-   ↓
-7. Parse AI Response
-   ↓
-8. Filter and Validate Comments
-   ↓
-9. Post Comments to PR/MR
-   ↓
-10. Update Summary and Stats
-```
+## Performance
 
-## User Experience
+| Metric | Target | Current Behaviour |
+| --- | --- | --- |
+| Review time (standard PR) | < 2 min | 1 AI call regardless of file count |
+| API calls per PR | Minimize | 1 batch call + optional verify calls |
+| Cache hit rate | > 60% | Per-file, version-keyed |
+| Diff size limit | 10 000 chars | Files above this are skipped |
 
-### Setup Flow
+## Security Properties
 
-#### For GitHub
-```bash
-# 1. Add to repository
-curl -o .github/workflows/ai-review.yml \
-  https://raw.githubusercontent.com/YOUR_ORG/ai-reviewer/main/templates/github-action.yml
-
-# 2. Configure secrets
-# GITHUB_TOKEN (automatic)
-# OPENROUTER_API_KEY (add in repo settings)
-
-# 3. Customize (optional)
-cp .ai-review-config.example.json .ai-review-config.json
-
-# 4. Commit and push
-git add .github/workflows/ai-review.yml .ai-review-config.json
-git commit -m "Add AI code reviewer"
-git push
-```
-
-#### For GitLab
-```bash
-# 1. Add to .gitlab-ci.yml
-curl -o .gitlab-ci-review.yml \
-  https://raw.githubusercontent.com/YOUR_ORG/ai-reviewer/main/templates/gitlab-ci.yml
-
-# Include in main .gitlab-ci.yml
-echo "include: .gitlab-ci-review.yml" >> .gitlab-ci.yml
-
-# 2. Configure CI/CD variables
-# GITLAB_TOKEN
-# OPENROUTER_API_KEY
-
-# 3. Customize (optional)
-cp .ai-review-config.example.json .ai-review-config.json
-
-# 4. Commit and push
-git add .gitlab-ci.yml .gitlab-ci-review.yml .ai-review-config.json
-git commit -m "Add AI code reviewer"
-git push
-```
-
-### Review Experience
-
-1. Developer creates PR/MR
-2. AI Reviewer runs automatically (1-2 minutes)
-3. Inline comments appear on specific lines
-4. Summary comment shows statistics
-5. Developer addresses feedback
-6. AI Reviewer re-runs on updates
-
-### Comment Format
-
-```markdown
-🚨 **CRITICAL**: SQL injection vulnerability detected
-
-The user input is directly concatenated into the SQL query without sanitization.
-
-**Issue**: Line 42
-query = f"SELECT * FROM users WHERE id = {user_id}"
-
-**Fix**: Use parameterized queries
-query = "SELECT * FROM users WHERE id = ?"
-cursor.execute(query, (user_id,))
-
-**References**:
-- OWASP SQL Injection: https://owasp.org/www-community/attacks/SQL_Injection
-- Django QuerySet API: https://docs.djangoproject.com/en/stable/ref/models/querysets/
-```
-
-## Implementation Plan
-
-### Phase 1: Core Refactoring (Week 1-2)
-- [ ] Abstract GitLab-specific code to platform adapter
-- [ ] Create GitHub adapter
-- [ ] Implement configuration system
-- [ ] Add language detection
-
-### Phase 2: Language Support (Week 3-4)
-- [ ] Add Flutter/Dart language rules
-- [ ] Add Go language rules
-- [ ] Add Java language rules
-- [ ] Create language-specific prompts
-
-### Phase 3: GitHub Integration (Week 5-6)
-- [ ] GitHub Actions workflow template
-- [ ] GitHub API integration
-- [ ] PR comment posting
-- [ ] Status check integration
-
-### Phase 4: Polish and Documentation (Week 7-8)
-- [ ] Comprehensive README
-- [ ] Setup guides per platform
-- [ ] Configuration examples
-- [ ] Video tutorials
+- Credentials stored in CI environment variables only
+- Config file (`.ai-review-config.json`) is excluded from review
+- Code is sent to OpenRouter; no self-hosted option yet
+- Linters run locally in the CI container
 
 ## Non-Functional Requirements
 
-### Performance
-- Review completion: < 2 minutes for standard PR
-- API response time: < 30 seconds per file
-- Cache hit rate: > 60% for unchanged files
+### Reliability
 
-### Security
-- Secure credential storage
-- No code sent to unauthorized endpoints
-- Audit logging for all API calls
-- Support for self-hosted AI models
+- Linter failures are non-fatal — review continues without linter data
+- AI API failures skip affected files and log the error
+- Cached results survive CI restarts within TTL window
 
 ### Scalability
-- Handle PRs with up to 50 files
-- Support repositories up to 100k files
-- Concurrent review support
-- Rate limiting and backoff
 
-### Reliability
-- 99% uptime for CI integration
-- Graceful degradation on API failures
-- Retry logic for transient errors
-- Clear error messages
-
-## Dependencies and Constraints
-
-### Technical Dependencies
-- Python 3.8+
-- Git CLI
-- GitHub/GitLab API access
-- AI provider API access
-
-### Constraints
-- API rate limits (GitHub: 5000/hour, GitLab: 300/min)
-- AI provider costs
-- Token context limits (varies by model)
-- CI/CD execution time limits
-
-### Assumptions
-- Users have basic Git knowledge
-- Users can configure CI/CD
-- Users have API access to their repos
-- Users are willing to share code with AI provider
-
-## Success Criteria
-
-### Launch Criteria
-- [ ] Works on GitHub and GitLab
-- [ ] Supports 5+ languages
-- [ ] < 5 minute setup time
-- [ ] Clear documentation
-- [ ] Working examples for each language
-
-### Post-Launch Metrics (3 months)
-- 100+ active installations
-- 1000+ PRs reviewed
-- 4+ star rating (if applicable)
-- < 10% error rate
-- Positive user testimonials
+- Single batch AI call scales linearly with context window (currently unlimited `max_tokens`)
+- Linter batching keeps subprocess count to O(languages), not O(files)
+- Files > 10 000 chars are skipped to stay within prompt budget
 
 ## Risk Assessment
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| AI provider costs too high | High | Medium | Support multiple providers, caching |
-| False positives annoy users | High | High | Configurable severity, feedback loop |
-| API rate limits hit | Medium | Medium | Caching, request batching |
-| Security concerns | High | Low | Clear privacy policy, self-hosted option |
-| Complex setup | Medium | Medium | Templates, documentation, videos |
+| Risk | Impact | Mitigation |
+| --- | --- | --- |
+| AI provider cost on large PRs | Medium | Caching, diff size limit, batch pricing |
+| False positives annoy reviewers | High | 2-pass verification, severity threshold config |
+| Linter not installed in CI | Low | Graceful skip per language |
+| OpenRouter outage | Medium | Error logged, review skipped; add retry |
+| Context window exceeded | Low | `_pack_batches` splits if needed |
 
 ## Open Questions
 
-1. Should we support Bitbucket?
-2. Should we offer a hosted SaaS version?
-3. Should we build a web dashboard?
-4. How to handle private/proprietary language frameworks?
-5. Should we integrate with Slack/Discord for notifications?
+1. Add GitHub PR status check integration?
+2. Add a second AI provider (direct Anthropic) as fallback?
+3. Should `language_specific` config keys drive actual linter rule selection?
+4. Should verification be async/parallel across issues?
+5. Add a `--dry-run` flag for local testing without posting?
 
-## Appendix
+## Glossary
 
-### Glossary
-- **PR**: Pull Request (GitHub)
-- **MR**: Merge Request (GitLab)
-- **CI/CD**: Continuous Integration/Continuous Deployment
-- **OWASP**: Open Web Application Security Project
-
-### References
-- GitHub Actions: https://docs.github.com/en/actions
-- GitLab CI: https://docs.gitlab.com/ee/ci/
-- OpenRouter: https://openrouter.ai/docs
-- Anthropic Claude: https://docs.anthropic.com/
+- **PR** — Pull Request (GitHub)
+- **MR** — Merge Request (GitLab)
+- **Linter-first** — Static analysis runs before the AI call; output is embedded in the prompt
+- **Batch review** — All pending files sent in one AI API call
+- **2-pass verification** — Cross-checking AI findings against linter output and git history
+- **Explainer** — PR-level markdown summary + quiz posted after inline comments

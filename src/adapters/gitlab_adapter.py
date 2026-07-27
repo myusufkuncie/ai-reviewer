@@ -84,7 +84,9 @@ class GitLabAdapter(PlatformAdapter):
                 'binary': change.get("binary", False),
                 'base_sha': mr.diff_refs["base_sha"],
                 'head_sha': mr.diff_refs["head_sha"],
-                'mr': mr
+                'mr': mr,
+                'pr_title': getattr(mr, 'title', '') or '',
+                'pr_description': getattr(mr, 'description', '') or '',
             })
 
         return changes
@@ -294,3 +296,19 @@ Please review the inline comments for details."""
 
         mr.notes.create({"body": f"{_BOT_MARKER}\n{summary}"})
         print("✓ Posted review summary")
+
+    def post_explainer_summary(
+        self, mr_iid: str, explainer_text: str, stats: Dict, comments: List[Dict]
+    ) -> None:
+        """Post Explainer + Understanding Quiz as MR summary comment"""
+        if not self.project:
+            raise RuntimeError(_NOT_AUTH)
+
+        mr = self.project.mergerequests.get(mr_iid)
+        total = len(comments)
+        header = (
+            f"## 🤖 AI Code Review — {stats['files_reviewed']} file(s)"
+            f" · {total} comment(s)\n\n"
+        )
+        mr.notes.create({"body": f"{_BOT_MARKER}\n{header}{explainer_text}"})
+        print("✓ Posted explainer summary")

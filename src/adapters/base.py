@@ -63,6 +63,20 @@ class PlatformAdapter(ABC):
         pass
 
     @abstractmethod
+    def post_explainer_summary(
+        self, pr_id: str, explainer_text: str, stats: Dict, comments: List[Dict]
+    ) -> None:
+        """Post Explainer + Understanding Quiz as PR summary comment
+
+        Args:
+            pr_id: Pull/Merge request ID
+            explainer_text: Markdown text from review_explainer()
+            stats: Review statistics
+            comments: All inline review comments
+        """
+        pass
+
+    @abstractmethod
     def clear_bot_comments(self, pr_id: str) -> int:
         """Delete all previous comments posted by this bot on the PR/MR.
 

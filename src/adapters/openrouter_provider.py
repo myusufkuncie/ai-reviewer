@@ -135,19 +135,23 @@ class OpenRouterProvider(AIProviderAdapter):
             print(f"✗ Error during review: {e}")
             return []
 
-    def review_batch(self, batch_context: str) -> List[Dict]:
-        """Send a single API call covering multiple files (batch mode).
+    def review_batch(self, batch_context: str) -> Dict:
+        """Send a single API call covering all files.
 
         Args:
             batch_context: Pre-built context string from
                 ContextBuilder.build_batch_context()
 
         Returns:
-            Flat list of review comments across all files in the batch
+            Dict with keys:
+                "comments": list of inline review comment dicts
+                "explainer": markdown string (Explainer + Understanding Quiz)
         """
+        empty = {"comments": [], "explainer": ""}
+
         if not self.api_key:
             print(_NO_API_KEY_MSG)
-            return []
+            return empty
 
         try:
             data = {
@@ -158,52 +162,55 @@ class OpenRouterProvider(AIProviderAdapter):
             if self.max_tokens is not None:
                 data["max_tokens"] = self.max_tokens
 
-            print("Calling OpenRouter API (batch)...")
+            print("Calling OpenRouter API...")
             _t0 = time.time()
             response = requests.post(
                 self.api_url,
                 headers=self._build_headers(),
                 json=data,
-                timeout=(10, 120),
+                timeout=(10, 300),
             )
             _api_elapsed = time.time() - _t0
 
             if response.status_code != 200:
                 print(
-                    f"✗ Batch API returned status {response.status_code}"
+                    f"✗ API returned status {response.status_code}"
                     f" (+{_api_elapsed:.2f}s)"
                 )
                 print(f"Response: {response.text[:200]}")
-                return []
+                return empty
 
             result = response.json()
             review_text = result["choices"][0]["message"]["content"]
 
-            start = review_text.find("[")
-            end = review_text.rfind("]") + 1
+            # Parse the combined JSON object {"comments": [...], "explainer": "..."}
+            start = review_text.find("{")
+            end = review_text.rfind("}") + 1
 
             if start >= 0 and end > start:
-                comments = json.loads(review_text[start:end])
+                parsed = json.loads(review_text[start:end])
+                comments = parsed.get("comments", [])
+                explainer = parsed.get("explainer", "")
                 print(
-                    f"✓ Batch received {len(comments)} comments"
+                    f"✓ Received {len(comments)} comments"
                     f" (+{_api_elapsed:.2f}s)"
                 )
-                return comments
+                return {"comments": comments, "explainer": explainer}
             else:
-                print("⚠ No valid JSON found in batch response")
-                return []
+                print("⚠ No valid JSON object found in response")
+                return empty
 
         except requests.exceptions.RequestException as e:
-            print(f"✗ Batch API request failed: {e}")
-            return []
+            print(f"✗ API request failed: {e}")
+            return empty
 
         except json.JSONDecodeError as e:
-            print(f"✗ Failed to parse batch JSON response: {e}")
-            return []
+            print(f"✗ Failed to parse JSON response: {e}")
+            return empty
 
         except Exception as e:
-            print(f"✗ Error during batch review: {e}")
-            return []
+            print(f"✗ Error during review: {e}")
+            return empty
 
     def verify_issue(self, verification_prompt: str) -> dict:
         """Verify a single issue with additional context

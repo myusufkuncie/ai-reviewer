@@ -1,327 +1,138 @@
-# AI Code Reviewer - Features List
+# Features
 
-## Core Features
+## Platform Support
 
-### 🌐 Multi-Platform Support
-- ✅ **GitHub Actions** integration
-- ✅ **GitLab CI** integration
-- 🔄 Bitbucket Pipelines (planned)
-- 🔄 Azure DevOps (planned)
+| Platform | Status |
+| --- | --- |
+| GitHub Actions | Supported |
+| GitLab CI | Supported |
+| Bitbucket Pipelines | Planned |
 
-### 💻 Multi-Language Support
-| Language | Status | Frameworks Supported |
-|----------|--------|---------------------|
-| Python | ✅ Ready | Django, Flask, FastAPI |
-| JavaScript/TypeScript | ✅ Ready | React, Vue, Angular, Next.js |
-| Dart/Flutter | ✅ Ready | Flutter framework |
-| Go | ✅ Ready | Gin, Echo, standard library |
-| Java | 🔄 Planned | Spring, Spring Boot |
-| Rust | 🔄 Planned | Actix, Rocket |
-| Ruby | 🔄 Planned | Rails, Sinatra |
-| PHP | 🔄 Planned | Laravel, Symfony |
+## Language Support
 
-### 🧠 Intelligent Context Analysis
-- ✅ Full file context (before/after changes)
-- ✅ Related files detection via imports
-- ✅ Project architecture understanding
-- ✅ README and documentation parsing
-- ✅ Docker configuration analysis
-- ✅ Dependency analysis
-- ✅ Test file correlation
-- ✅ Change impact assessment
+| Language | Linter | Frameworks in Context |
+| --- | --- | --- |
+| Python | pylint / flake8 | Django, Flask, FastAPI |
+| JavaScript | eslint | React, Vue, Angular, Next.js |
+| TypeScript | eslint | React, Next.js |
+| Dart / Flutter | dart analyze | Flutter |
+| Go | golangci-lint / go vet | Gin, Echo |
+| Rust | cargo clippy | Actix, Rocket |
+| Java | checkstyle | Spring |
+| PHP | phpcs / php -l | Laravel |
 
-### 🔒 Security Analysis
-- ✅ OWASP Top 10 vulnerability detection
-- ✅ SQL injection detection
-- ✅ XSS (Cross-Site Scripting) detection
-- ✅ CSRF protection verification
-- ✅ Authentication/Authorization issues
-- ✅ Hardcoded secrets detection
-- ✅ Path traversal detection
-- ✅ Command injection detection
-- ✅ Insecure deserialization detection
+Language is detected from file extension. Linters must be available in the CI environment; if absent, that step is skipped gracefully.
 
-### ⚡ Performance Analysis
-- ✅ N+1 query detection
-- ✅ Memory leak detection
-- ✅ Performance anti-patterns
-- ✅ Resource leak detection
-- ✅ Inefficient algorithms
-- ✅ Build method optimization (Flutter)
-- ✅ Goroutine leak detection (Go)
+## Review Pipeline
 
-### ⚙️ Highly Configurable
-- ✅ Custom review rules per project
-- ✅ Severity threshold configuration
-- ✅ File/directory exclusions
-- ✅ Language-specific settings
-- ✅ Custom pattern matching
-- ✅ Comment style customization
-- ✅ Max comments per file limit
+### Batch AI Review
 
-### 💾 Smart Caching
-- ✅ Review result caching
-- ✅ Hash-based cache keys
-- ✅ TTL-based expiration
-- ✅ Local file-based cache
-- 🔄 Distributed cache support (planned)
-- ✅ 60%+ cache hit rate typical
+All pending files are sent in one API call rather than one call per file. This reduces latency and cost significantly on PRs with many changed files. The batch context includes PR title, README excerpt, Dockerfile context, and per-file diffs with embedded linter output.
 
-### 📊 Detailed Reports
-- ✅ Inline PR/MR comments
-- ✅ Severity-based categorization
-- ✅ Summary statistics
-- ✅ Code examples in comments
-- ✅ Fix suggestions
-- ✅ Reference links
-- ✅ Emoji indicators
+### Linter-First (Pass 1)
 
-## Language-Specific Features
+Before the AI call, linters run for each language group in a single subprocess. Issues are filtered to changed lines only to keep the AI context compact. Linter output is embedded in the batch prompt so the AI can see static-analysis findings alongside the diff.
 
-### Python/Django
-- ✅ Django ORM best practices
-- ✅ Type hints checking
-- ✅ PEP 8 compliance
-- ✅ Django security patterns
-- ✅ Async/await patterns
-- ✅ Migration review
-- ✅ Serializer validation
+### 2-Pass Verification
 
-### Flutter/Dart
-- ✅ Widget best practices
-- ✅ State management patterns (BLoC, Riverpod, Provider)
-- ✅ Build method optimization
-- ✅ Memory leak detection (dispose)
-- ✅ Async gaps detection
-- ✅ Platform-specific code review
-- ✅ Accessibility checks
-- ✅ Pubspec.yaml validation
+For `critical` and `major` findings, the `DoubleCheckVerifier` cross-checks each issue against:
 
-### Go
-- ✅ Error handling patterns
-- ✅ Goroutine safety
-- ✅ Context usage
-- ✅ Interface design review
-- ✅ Race condition detection
-- ✅ Defer placement review
-- ✅ Idiomatic Go patterns
+- Cached linter results (line-number match)
+- Git history of the file (last 3 commits)
+- Related files mentioned in the issue text
 
-### JavaScript/TypeScript
-- ✅ React hooks rules
-- ✅ Async/await best practices
-- ✅ TypeScript type safety
-- ✅ Memory leak detection
-- ✅ Performance optimization
-- ✅ Bundle size considerations
+Issues are tagged `linter_confirmed: true/false`. Minor and suggestion findings pass through unchanged. No issues are dropped by verification — it only enriches metadata.
 
-## Configuration Features
+### Explainer + Understanding Quiz
 
-### Exclusion Rules
+After inline comments are posted, a PR-level summary block is posted containing:
+
+- A plain-language description of what changed
+- An understanding quiz for reviewers
+
+This is separate from inline comments and is only posted when the AI returns an `explainer` field.
+
+## Caching
+
+- MD5-based cache keys per file: `hash(filepath + diff + version)`
+- File-backed storage with TTL expiration (default 7 days)
+- Cache hits skip the linter and AI entirely for that file
+- Current cache version: `v6-linter-first`
+
+## Severity Levels
+
+| Level | Description |
+| --- | --- |
+| critical | Security vulnerabilities, data integrity risks |
+| major | Bugs, likely runtime errors, breaking changes |
+| minor | Code quality, missing error handling |
+| suggestion | Style, refactoring, best-practice nudges |
+
+Only `critical` and `major` findings go through the verification step.
+
+## AI Provider
+
+The only implemented provider is **OpenRouter** (`openrouter_provider.py`). It exposes any model available on the OpenRouter platform.
+
+Default model: `z-ai/glm-4.5-air`. Change via config:
+
+```json
+{
+  "model": "anthropic/claude-sonnet-4-5"
+}
+```
+
+Temperature defaults to `0.3`. `max_tokens` defaults to `null` (model uses its full context window).
+
+## Configuration
+
+All settings live in `.ai-review-config.json` at the repo root. The file is optional — hardcoded defaults apply if absent.
+
+### Exclusions
+
 ```json
 {
   "exclusions": {
     "directories": ["node_modules", "vendor", "build"],
     "file_patterns": ["*.lock", "*.min.js"],
-    "file_prefixes": ["test_", "_test"]
+    "file_prefixes": ["test_"]
   }
 }
 ```
 
-### Language-Specific Rules
-```json
-{
-  "language_specific": {
-    "flutter": {
-      "widget_best_practices": true,
-      "state_management": ["bloc", "riverpod"]
-    },
-    "python": {
-      "django_security": true,
-      "check_type_hints": true
-    }
-  }
-}
-```
+### Review settings
 
-### Review Settings
 ```json
 {
   "review_settings": {
     "severity_threshold": "minor",
-    "check_security": true,
-    "check_performance": true,
     "max_comments_per_file": 10
   }
 }
 ```
 
-### Custom Pattern Rules
+### Cache settings
+
 ```json
 {
-  "custom_rules": {
-    "patterns": [
-      {
-        "name": "Hardcoded secrets",
-        "pattern": "(password|secret|api_key)\\s*=\\s*['\"][^'\"]+['\"]",
-        "severity": "critical",
-        "message": "Use environment variables"
-      }
-    ]
+  "cache_settings": {
+    "cache_location": ".review_cache",
+    "ttl_days": 7
   }
 }
 ```
 
-## AI Provider Features
+## Comment Posting
 
-### Supported Providers
-| Provider | Models Available | Cost | Speed |
-|----------|-----------------|------|-------|
-| OpenRouter | Claude, GPT-4, Gemini, Llama | $0.10/PR | Fast |
-| Anthropic | Claude Sonnet, Opus | $0.12/PR | Fast |
-| OpenAI | GPT-4 Turbo, GPT-4 | $0.20/PR | Medium |
-| Self-hosted | Ollama, Custom | Free | Varies |
+- Previous bot comments are cleared before posting new ones (idempotent re-runs)
+- Inline comments are posted at the specific diff line
+- A single PR-level summary or explainer block is posted after inline comments
 
-### Model Selection
-- ✅ Choose model per project
-- ✅ Temperature control
-- ✅ Max tokens configuration
-- ✅ Custom API endpoints
+## Planned / Not Yet Implemented
 
-## Review Severity Levels
-
-| Level | Emoji | Description | Examples |
-|-------|-------|-------------|----------|
-| Critical | 🚨 | Security vulnerabilities, data loss | SQL injection, XSS, secrets |
-| Major | ⚠️ | Bugs, breaking changes | Memory leaks, race conditions |
-| Minor | 💡 | Code quality issues | Missing error handling, unused vars |
-| Suggestion | 💭 | Best practices, optimizations | Code style, refactoring ideas |
-
-## Integration Features
-
-### GitHub Actions
-- ✅ Automatic PR comment posting
-- ✅ GitHub API authentication
-- ✅ Status checks integration
-- 🔄 Review approval workflows (planned)
-- ✅ Workflow templates for all languages
-- ✅ Cache artifact support
-
-### GitLab CI
-- ✅ Merge Request discussions
-- ✅ GitLab API authentication
-- ✅ Pipeline integration
-- ✅ CI/CD variables support
-- ✅ Cache support
-- ✅ Artifact reports
-
-## Workflow Features
-
-### Easy Setup
-- ✅ 5-minute setup time
-- ✅ Copy-paste templates
-- ✅ Auto-detect language
-- ✅ Sensible defaults
-- ✅ Example configurations
-
-### Automatic Triggers
-- ✅ On PR/MR creation
-- ✅ On PR/MR update
-- ✅ On PR/MR reopening
-- ✅ Skip draft PRs (optional)
-- ✅ Conditional on file changes
-
-### Smart Filtering
-- ✅ Skip binary files
-- ✅ Skip generated files
-- ✅ Skip test files (optional)
-- ✅ Skip large diffs
-- ✅ File size limits
-
-## Cost Management Features
-
-### Cost Reduction
-- ✅ Smart caching (60% savings)
-- ✅ Exclusion rules
-- ✅ Token limit controls
-- ✅ Context truncation
-- ✅ Batch processing
-- ✅ Cheaper model options
-
-### Cost Tracking
-- ✅ Tokens used per review
-- ✅ API calls count
-- 🔄 Cost estimation dashboard (planned)
-
-## Developer Experience
-
-### Review Quality
-- ✅ Context-aware comments
-- ✅ Actionable suggestions
-- ✅ Code examples
-- ✅ Reference documentation
-- ✅ Clear explanations
-
-### Customization
-- ✅ Configurable severity
-- ✅ Custom rules
-- ✅ Team-specific patterns
-- ✅ Branch-specific configs
-- ✅ Project-specific settings
-
-### Debugging
-- ✅ Debug mode
-- ✅ Detailed error messages
-- ✅ CI/CD logs
-- ✅ Dry run mode
-- ✅ Cache inspection
-
-## Advanced Features (Planned)
-
-### 🔄 Coming Soon
-- [ ] Self-hosted AI models (Ollama)
-- [ ] VSCode extension
-- [ ] Web dashboard
-- [ ] Team learning
-- [ ] Custom rule suggestions
-- [ ] Slack/Discord notifications
-- [ ] Multi-language comments
-- [ ] Review analytics
-- [ ] A/B testing configs
-- [ ] Bitbucket support
-
-### 🎯 Future Ideas
-- [ ] Pre-commit hook integration
-- [ ] IDE inline suggestions
-- [ ] Code quality trends
-- [ ] Team performance metrics
-- [ ] AI-assisted fix generation
-- [ ] Interactive review chat
-
-## Comparison with Alternatives
-
-| Feature | AI Reviewer | GitHub Copilot | GitLab Suggestions |
-|---------|-------------|----------------|-------------------|
-| Multi-platform | ✅ GitHub + GitLab | ❌ GitHub only | ❌ GitLab only |
-| Cost | $0.10/PR | $10-19/user/month | Enterprise only |
-| Customizable | ✅ Fully | ❌ Limited | ❌ Limited |
-| Self-hosted | 🔄 Planned | ❌ No | ❌ No |
-| Multi-language | ✅ 6+ languages | ✅ Many | ✅ Many |
-| Security focus | ✅ OWASP Top 10 | ❌ Basic | ✅ Good |
-
-## Getting Started
-
-Choose your path:
-- **Quick**: [QUICKSTART.md](QUICKSTART.md) - 5 minutes
-- **Detailed**: [SETUP.md](SETUP.md) - Complete guide
-- **Examples**: See config files in repository root
-
-## Learn More
-
-- 📖 [README.md](README.md) - Full documentation
-- 🏗️ [PRD.md](PRD.md) - Product requirements
-- 🔄 [FLOW.md](FLOW.md) - Architecture
-- 🤝 [CONTRIBUTING.md](CONTRIBUTING.md) - Contribute
-
----
-
-**Last Updated**: 2026-02-06
+- Bitbucket support
+- Direct Anthropic / OpenAI / Ollama provider adapters
+- Web dashboard
+- Slack / Discord notifications
+- VSCode extension
+- Distributed cache (Redis)

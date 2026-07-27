@@ -83,7 +83,9 @@ class GitHubAdapter(PlatformAdapter):
                 'binary': file.patch is None,
                 'base_sha': pr.base.sha,
                 'head_sha': pr.head.sha,
-                'pr': pr
+                'pr': pr,
+                'pr_title': pr.title or '',
+                'pr_description': pr.body or '',
             })
 
         return changes
@@ -341,3 +343,19 @@ Please review the inline comments for details."""
 
         pr.create_issue_comment(f"{_BOT_MARKER}\n{summary}")
         print("✓ Posted review summary")
+
+    def post_explainer_summary(
+        self, pr_number: str, explainer_text: str, stats: Dict, comments: List[Dict]
+    ) -> None:
+        """Post Explainer + Understanding Quiz as PR summary comment"""
+        if not self.repo:
+            raise RuntimeError(_NOT_AUTH)
+
+        pr = self.repo.get_pull(int(pr_number))
+        total = len(comments)
+        header = (
+            f"## 🤖 AI Code Review — {stats['files_reviewed']} file(s)"
+            f" · {total} comment(s)\n\n"
+        )
+        pr.create_issue_comment(f"{_BOT_MARKER}\n{header}{explainer_text}")
+        print("✓ Posted explainer summary")
