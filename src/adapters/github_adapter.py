@@ -20,6 +20,7 @@ class GitHubAdapter(PlatformAdapter):
         self.pr_number = os.getenv("GITHUB_PR_NUMBER")
         self.base_ref = os.getenv("GITHUB_BASE_REF")
         self.head_ref = os.getenv("GITHUB_HEAD_REF")
+        self._tree_cache: dict = {}  # sha -> {path: {path, name, type}}
 
         print("=" * 80)
         print("GitHub Adapter Initialization")
@@ -101,30 +102,38 @@ class GitHubAdapter(PlatformAdapter):
         except Exception:
             return None
 
+    def _get_full_tree(self, ref: str) -> Dict:
+        """Fetch the full repo tree once and cache it by ref."""
+        if ref in self._tree_cache:
+            return self._tree_cache[ref]
+
+        tree_map: Dict = {}
+        try:
+            git_tree = self.repo.get_git_tree(ref, recursive=True)
+            for item in git_tree.tree:
+                tree_map[item.path] = {
+                    'path': item.path,
+                    'name': item.path.split('/')[-1],
+                    'type': 'blob' if item.type == 'blob' else 'tree',
+                }
+            print(f"✓ Fetched full repo tree ({len(tree_map)} entries)")
+        except Exception as e:
+            print(f"  Warning: Could not fetch repo tree: {e}")
+
+        self._tree_cache[ref] = tree_map
+        return tree_map
+
     def get_directory_tree(self, directory: str, ref: str) -> List[Dict]:
-        """Get directory tree (list of files)"""
+        """Get directory listing by filtering the cached full repo tree."""
         if not self.repo:
             return []
 
-        try:
-            contents = self.repo.get_contents(directory, ref=ref)
-            if not isinstance(contents, list):
-                contents = [contents]
-
-            return [
-                {
-                    'path': item.path,
-                    'name': item.name,
-                    'type': 'blob' if item.type == 'file' else 'tree'
-                }
-                for item in contents
-            ]
-        except Exception as e:
-            print(
-                f"  Warning: Could not get directory tree"
-                f" for {directory}: {e}"
-            )
-            return []
+        tree_map = self._get_full_tree(ref)
+        prefix = directory.rstrip('/') + '/'
+        return [
+            entry for path, entry in tree_map.items()
+            if path.startswith(prefix) and '/' not in path[len(prefix):]
+        ]
 
     def post_comments(self, pr_number: str, comments: List[Dict]) -> None:
         """Post review comments to pull request"""
