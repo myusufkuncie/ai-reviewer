@@ -898,8 +898,8 @@ Return empty array [] if code looks good. Be specific and constructive."""
                 numbered = '\n'.join(lines_with_numbers)
                 context += f"### Full File AFTER (with line numbers)\n```\n{numbered}\n```\n\n"
 
-            # Callers found in the same PR
-            if all_pr_filepaths:
+            # Callers found in the same PR (skip when batch is large — all files already in context)
+            if all_pr_filepaths and len(file_items) <= 5:
                 callers = self.find_callers_in_pr(filepath, all_pr_filepaths, head_sha)
                 if callers:
                     context += f"### Callers in this PR ({len(callers)} file(s) that import this file)\n\n"

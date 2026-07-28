@@ -21,6 +21,7 @@ class GitHubAdapter(PlatformAdapter):
         self.base_ref = os.getenv("GITHUB_BASE_REF")
         self.head_ref = os.getenv("GITHUB_HEAD_REF")
         self._tree_cache: dict = {}  # sha -> {path: {path, name, type}}
+        self._content_cache: dict = {}  # (filepath, ref) -> content | None
 
         print("=" * 80)
         print("GitHub Adapter Initialization")
@@ -92,15 +93,23 @@ class GitHubAdapter(PlatformAdapter):
         return changes
 
     def get_file_content(self, filepath: str, ref: str) -> Optional[str]:
-        """Get file content at specific ref"""
+        """Get file content at specific ref, cached per (filepath, ref)."""
         if not self.repo:
             return None
 
+        key = (filepath, ref)
+        if key in self._content_cache:
+            return self._content_cache[key]
+
+        result = None
         try:
             content = self.repo.get_contents(filepath, ref=ref)
-            return content.decoded_content.decode('utf-8')
+            result = content.decoded_content.decode('utf-8')
         except Exception:
-            return None
+            pass
+
+        self._content_cache[key] = result
+        return result
 
     def _get_full_tree(self, ref: str) -> Dict:
         """Fetch the full repo tree once and cache it by ref."""
